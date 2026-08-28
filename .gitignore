@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Never commit real secrets — this is here specifically because DATABASE_URL, GEMINI_API_KEY,
+# ANTHROPIC_API_KEY are all read from the environment, and a .env file is the most common place
+# people accidentally put real keys and then commit by mistake.
+.env
+.env.*
+!.env.example
+
+# editor/OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dispatch Desk — Agent Framework</title>
+<style>
+  :root {
+    --slate: #1B2430;
+    --slate-deep: #141B24;
+    --paper: #EFE7D8;
+    --paper-dim: #E3D9C4;
+    --ink: #23201B;
+    --ink-soft: #5A5346;
+    --cobalt: #2A4B7C;
+    --stamp-red: #A3331F;
+    --mustard: #C99A3F;
+    --rule: rgba(35, 32, 27, 0.18);
+    --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    --font-mono: "IBM Plex Mono", "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--slate);
+    background-image:
+      radial-gradient(circle at 15% 8%, rgba(201,154,63,0.06), transparent 40%),
+      radial-gradient(circle at 85% 92%, rgba(42,75,124,0.10), transparent 45%);
+    color: var(--paper);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+    padding: 32px 20px 80px;
+  }
+
+  a { color: var(--mustard); }
+
+  .wrap { max-width: 760px; margin: 0 auto; }
+
+  header {
+    border-bottom: 2px solid var(--paper-dim);
+    padding-bottom: 18px;
+    margin-bottom: 28px;
+  }
+
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--mustard);
+    margin-bottom: 8px;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(28px, 5vw, 40px);
+    margin: 0 0 6px;
+    color: var(--paper);
+    letter-spacing: 0.01em;
+  }
+
+  .sub {
+    color: rgba(239,231,216,0.6);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .sub code {
+    background: rgba(239,231,216,0.08);
+    padding: 1px 5px;
+    border-radius: 2px;
+    color: var(--paper);
+  }
+
+  /* --- ticket form (the paper slip) --- */
+  form {
+    background: var(--paper);
+    color: var(--ink);
+    border-radius: 3px;
+    padding: 22px 22px 20px;
+    box-shadow: 0 14px 34px rgba(0,0,0,0.35);
+    position: relative;
+  }
+
+  form::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 24px; right: 24px; height: 2px;
+    background: repeating-linear-gradient(90deg, var(--ink) 0 6px, transparent 6px 12px);
+    opacity: 0.18;
+  }
+
+  .field { margin-bottom: 16px; }
+
+  label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 6px;
+  }
+  label .hint { text-transform: none; letter-spacing: normal; font-size: 11px; opacity: 0.65; }
+
+  textarea, input[type="text"] {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--ink);
+    background: #fbf8f1;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 10px 12px;
+    resize: vertical;
+  }
+  textarea { min-height: 92px; }
+
+  textarea:focus, input:focus, button:focus-visible {
+    outline: 3px solid var(--cobalt);
+    outline-offset: 1px;
+  }
+
+  .row { display: flex; gap: 14px; flex-wrap: wrap; }
+  .row .field { flex: 1 1 220px; }
+
+  button[type="submit"] {
+    width: 100%;
+    background: var(--stamp-red);
+    color: var(--paper);
+    border: none;
+    border-radius: 2px;
+    padding: 13px 16px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-size: 13px;
+    cursor: pointer;
+    transition: transform 0.08s ease, background 0.15s ease;
+  }
+  button[type="submit"]:hover { background: #8c2a19; }
+  button[type="submit"]:active { transform: scale(0.99); }
+  button[type="submit"]:disabled { opacity: 0.55; cursor: progress; }
+
+  /* --- perforation between form and manifest --- */
+  .perf {
+    height: 22px;
+    background:
+      radial-gradient(circle 5px at 0 50%, var(--slate) 4px, transparent 5px),
+      radial-gradient(circle 5px at 100% 50%, var(--slate) 4px, transparent 5px);
+    position: relative;
+  }
+  .perf::before {
+    content: "";
+    position: absolute; top: 50%; left: 12px; right: 12px; height: 0;
+    border-top: 2px dashed rgba(239,231,216,0.35);
+  }
+
+  /* --- manifest / pipeline --- */
+  #manifest { display: none; }
+  #manifest.show { display: block; }
+
+  .manifest-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 14px;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(239,231,216,0.55);
+  }
+  .manifest-head .run-id { color: var(--mustard); }
+
+  .stage {
+    background: var(--paper);
+    color: var(--ink);
+    border-radius: 3px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    position: relative;
+    opacity: 0;
+    transform: translateY(6px);
+    animation: stage-in 0.35s ease forwards;
+    border-left: 4px solid var(--rule);
+  }
+  .stage.pending { border-left-color: var(--rule); }
+  .stage.running { border-left-color: var(--cobalt); }
+  .stage.done { border-left-color: var(--stamp-red); }
+  .stage.error { border-left-color: var(--stamp-red); background: #f7e3df; }
+
+  @keyframes stage-in {
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stage { animation: none; opacity: 1; transform: none; }
+  }
+
+  .stage-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .stage-name {
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .stamp {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 2px 8px;
+    border-radius: 2px;
+    border: 1.5px solid currentColor;
+    transform: rotate(-3deg);
+  }
+  .stamp.pending { color: var(--ink-soft); opacity: 0.5; }
+  .stamp.running { color: var(--cobalt); }
+  .stamp.done { color: var(--stamp-red); }
+  .stamp.error { color: var(--stamp-red); }
+
+  .stage-body { font-size: 13px; line-height: 1.55; color: var(--ink); }
+  .stage-body .muted { color: var(--ink-soft); font-size: 12px; }
+  .stage-body ul { margin: 4px 0 0; padding-left: 18px; }
+  .stage-body li { margin-bottom: 3px; }
+
+  .reply-box {
+    background: var(--slate-deep);
+    color: var(--paper);
+    border: 1px solid rgba(201,154,63,0.35);
+    border-radius: 3px;
+    padding: 18px;
+    margin-top: 16px;
+  }
+  .reply-box .eyebrow { margin-bottom: 10px; }
+  .reply-text { white-space: pre-wrap; line-height: 1.6; font-size: 14px; color: var(--paper); }
+  .usage {
+    margin-top: 12px;
+    font-size: 11px;
+    color: rgba(239,231,216,0.5);
+    letter-spacing: 0.04em;
+  }
+
+  .error-banner {
+    background: #3a1c17;
+    border: 1px solid var(--stamp-red);
+    color: #f2c9c0;
+    padding: 12px 14px;
+    border-radius: 3px;
+    font-size: 13px;
+    margin-top: 14px;
+  }
+
+  footer {
+    margin-top: 40px;
+    font-size: 11px;
+    color: rgba(239,231,216,0.35);
+    text-align: center;
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="eyebrow">Agent Framework — Support Dispatch</div>
+      <h1>Dispatch Desk</h1>
+      <div class="sub">
+        Submits a ticket to the <code>customer-support-ticket</code> flow and shows each
+        pipeline stage's actual result. Reuse a Customer ID across tickets to see the
+        long-term-memory recall stage find prior tickets. See <a href="/docs">/docs</a> for the raw API.
+      </div>
+    </header>
+
+    <form id="ticket-form">
+      <div class="field">
+        <label for="ticket_text">Ticket <span class="hint">what the customer wrote</span></label>
+        <textarea id="ticket_text" required placeholder="My package arrived damaged, I need a replacement or refund.">My package arrived damaged, I need a replacement or refund.</textarea>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="session_id">Customer ID <span class="hint">optional</span></label>
+          <input type="text" id="session_id" placeholder="e.g. cust-42 — reuse to test memory recall">
+        </div>
+      </div>
+      <button type="submit" id="submit-btn">Route Ticket</button>
+    </form>
+
+    <div class="perf"></div>
+
+    <div id="manifest">
+      <div class="manifest-head">
+        <span>Routing Manifest</span>
+        <span class="run-id" id="run-id-label"></span>
+      </div>
+      <div id="stages"></div>
+    </div>
+
+    <div id="error-container"></div>
+
+    <footer>agentframework — built from scratch, deployed for real</footer>
+  </div>
+
+<script>
+const STAGE_DEFS = [
+  { key: "search_kb", label: "Search Knowledge Base",
+    render: (r) => {
+      const results = (r && r.results) || [];
+      if (!results.length) return '<div class="muted">No matching articles found.</div>';
+      return '<ul>' + results.map(d =>
+        `<li><strong>${escapeHtml(d.doc_id)}</strong> — ${escapeHtml(d.snippet)}</li>`
+      ).join('') + '</ul>';
+    }},
+  { key: "recall_history", label: "Recall Customer History",
+    render: (r) => {
+      const items = r || [];
+      if (!items.length) return '<div class="muted">No prior tickets on file for this customer.</div>';
+      return '<ul>' + items.map(t => `<li>${escapeHtml(t)}</li>`).join('') + '</ul>';
+    }},
+  { key: "draft_reply", label: "Draft Reply",
+    render: (r) => {
+      if (!r) return '<div class="muted">—</div>';
+      const usage = r.usage || {};
+      return `<div class="reply-box">
+        <div class="eyebrow">Drafted Reply</div>
+        <div class="reply-text">${escapeHtml(r.response || "")}</div>
+        <div class="usage">${usage.tokens ?? "?"} tokens · $${(usage.cost ?? 0).toFixed(6)}</div>
+      </div>`;
+    }},
+  { key: "remember_ticket", label: "Remember Ticket",
+    render: (r) => `<div class="muted">${escapeHtml(String(r || "—"))}</div>` },
+];
+
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+const form = document.getElementById('ticket-form');
+const submitBtn = document.getElementById('submit-btn');
+const manifest = document.getElementById('manifest');
+const stagesEl = document.getElementById('stages');
+const runIdLabel = document.getElementById('run-id-label');
+const errorContainer = document.getElementById('error-container');
+
+function renderPendingStages() {
+  stagesEl.innerHTML = STAGE_DEFS.map(s => `
+    <div class="stage pending" data-key="${s.key}">
+      <div class="stage-top">
+        <span class="stage-name">${s.label}</span>
+        <span class="stamp pending">Pending</span>
+      </div>
+      <div class="stage-body muted">Waiting…</div>
+    </div>
+  `).join('');
+}
+
+function revealStage(stageEl, status, bodyHtml, index) {
+  return new Promise(resolve => {
+    setTimeout(() => {
+      stageEl.className = 'stage ' + status;
+      stageEl.querySelector('.stamp').className = 'stamp ' + status;
+      stageEl.querySelector('.stamp').textContent =
+        status === 'done' ? 'Processed' : status === 'error' ? 'Failed' : 'Running';
+      stageEl.querySelector('.stage-body').innerHTML = bodyHtml;
+      resolve();
+    }, index === 0 ? 120 : 420);
+  });
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errorContainer.innerHTML = '';
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Transmitting…';
+
+  manifest.classList.add('show');
+  renderPendingStages();
+  runIdLabel.textContent = '';
+
+  const ticketText = document.getElementById('ticket_text').value.trim();
+  const sessionId = document.getElementById('session_id').value.trim();
+
+  const body = {
+    flow_name: 'customer-support-ticket',
+    inputs: { ticket_text: ticketText },
+  };
+  if (sessionId) body.session_id = sessionId;
+
+  try {
+    const res = await fetch('/v1/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.detail || `Request failed (HTTP ${res.status})`);
+    }
+    const created = await res.json();
+    runIdLabel.textContent = created.run_id;
+
+    const detailRes = await fetch(`/v1/runs/${created.run_id}`);
+    if (!detailRes.ok) throw new Error(`Could not retrieve run ${created.run_id}`);
+    const detail = await detailRes.json();
+
+    const stageEls = STAGE_DEFS.map(s => stagesEl.querySelector(`[data-key="${s.key}"]`));
+    for (let i = 0; i < STAGE_DEFS.length; i++) {
+      const def = STAGE_DEFS[i];
+      const task = (detail.tasks || {})[def.key];
+      const status = !task ? 'error' : task.status === 'succeeded' ? 'done' : 'error';
+      const bodyHtml = task && task.status === 'succeeded'
+        ? def.render(task.result)
+        : `<div class="muted">${escapeHtml((task && task.error) || 'No data returned.')}</div>`;
+      await revealStage(stageEls[i], status, bodyHtml, i);
+    }
+  } catch (err) {
+    errorContainer.innerHTML = `<div class="error-banner"><strong>Undeliverable —</strong> ${escapeHtml(err.message)}</div>`;
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Route Ticket';
+  }
+});
+</script>
+</body>
+</html>
