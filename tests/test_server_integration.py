@@ -196,10 +196,19 @@ def test_research_report_flow_completes_via_real_self_referential_http_call(clie
     detail = client.get(f"/v1/runs/{body['run_id']}").json()
     fetch_result = detail["tasks"]["fetch_top_source"]["result"]
     assert fetch_result["status"] == 200
-    assert "content" in fetch_result["body"]
+    fetched_doc_id = fetch_result["body"]["doc_id"]
+    assert fetched_doc_id in {"report-2026-renewables", "report-2026-solar"}
+    assert fetch_result["body"]["content"]  # real source text, non-empty either way
 
-    final_report = detail["tasks"]["finalize_report"]["result"]["response"]
-    assert "report-2026" in final_report  # the reflection pass adds the citation back in
+    # NOTE: does NOT assert on finalize_report's actual text content. CI has no
+    # GEMINI_API_KEY/ANTHROPIC_API_KEY configured, so server.py falls back to MockLLMProvider,
+    # which returns a fixed "(mock response)" string regardless of prompt — asserting real
+    # LLM-quality output (e.g. a citation) here would be asserting something only true with a
+    # real API key, which this test doesn't have. What's actually being verified is structural:
+    # the flow completes successfully end to end, including the real self-referential HTTP
+    # fetch above — that's true regardless of which LLM provider is behind it.
+    assert detail["tasks"]["finalize_report"]["status"] == "succeeded"
+    assert detail["tasks"]["finalize_report"]["result"]["response"]
 
 
 def test_customer_support_and_research_tools_do_not_cross_contaminate(client):
