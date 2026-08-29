@@ -6,16 +6,21 @@ FastAPI/uvicorn are installed:
     uvicorn agentframework.integrations.fastapi_ingress:build_app --factory
 
 `build_app` takes the same (orchestrator, flow_registry) the stdlib server takes, so callers
-don't need to change anything else in how they wire the framework together. An optional third
-argument, `orchestrators_by_flow`, lets specific flow names run against a DIFFERENT orchestrator
-instance than the default — needed when two agents' tool registries can't be merged into one
-(see docs/Memory.md: the customer support and research reference agents both register tools
-named "search" and "llm_call", with different underlying data; ToolRegistry.register() silently
-overwrites on name collision, so naively sharing one registry between them would make one
-agent's "search" quietly return the other agent's documents). Every orchestrator passed this way
-should share the same state_store as the default orchestrator — get_run/get_audit below always
-read through the default orchestrator's state_store, so a run created by a different
-orchestrator is only findable afterward if they're actually the same underlying store.
+don't need to change anything else in how they wire the framework together. Two optional
+keyword arguments extend it: `orchestrators_by_flow` lets specific flow names run against a
+DIFFERENT orchestrator instance than the default — needed when two agents' tool registries
+can't be merged into one (see docs/Memory.md: the customer support and research reference
+agents both register tools named "search" and "llm_call", with different underlying data;
+ToolRegistry.register() silently overwrites on name collision, so naively sharing one registry
+between them would make one agent's "search" quietly return the other agent's documents). Every
+orchestrator passed this way should share the same state_store as the default orchestrator —
+get_run/get_audit below always read through the default orchestrator's state_store, so a run
+created by a different orchestrator is only findable afterward if they're actually the same
+underlying store. `lifespan` is a startup/shutdown async context manager (FastAPI's current
+recommended pattern — see docs/Memory.md: this replaced an earlier `@app.on_event("startup")`
+in server.py after FastAPI/pytest flagged it as deprecated) passed straight through to the
+`FastAPI(...)` constructor, since `lifespan` can only be set at construction time, not attached
+to an already-built `app` object the way `on_event` could be.
 
 IMPORTANT (see docs/Memory.md for the incident this fixed): `RunRequestBody` must be defined at
 true module level, NOT inside `build_app()`. A Pydantic `BaseModel` defined inside a function
@@ -75,7 +80,8 @@ _STATUS_CODE_BY_ERROR_NAME = {
 
 
 def build_app(orchestrator: AsyncOrchestrator, flow_registry: FlowRegistry,
-              orchestrators_by_flow: Optional[dict[str, AsyncOrchestrator]] = None):
+              orchestrators_by_flow: Optional[dict[str, AsyncOrchestrator]] = None,
+              lifespan: Optional[Any] = None):
     if _IMPORT_ERROR is not None:
         raise ImportError(
             "fastapi_ingress requires the 'server' extra: pip install -e '.[server]'"
@@ -83,7 +89,7 @@ def build_app(orchestrator: AsyncOrchestrator, flow_registry: FlowRegistry,
 
     orchestrators_by_flow = orchestrators_by_flow or {}
 
-    app = FastAPI(title="agentframework ingress")
+    app = FastAPI(title="agentframework ingress", lifespan=lifespan)
 
     @app.exception_handler(AgentFrameworkError)
     async def agentframework_error_handler(request: Request, exc: AgentFrameworkError):

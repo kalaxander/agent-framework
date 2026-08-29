@@ -57,7 +57,7 @@ def _make_fastapi_pydantic_stubs():
     stub-based FastAPI test below (rather than each test hand-rolling its own near-duplicate
     stub, which is exactly the kind of duplication that made these three drift out of sync when
     fastapi_ingress.py started using Request/exception_handler/JSONResponse). Call fresh per
-    test — `.routes`/`._startup_handlers` must not leak between tests.
+    test — `.routes` must not leak between tests.
 
     These stubs only support calling route handlers DIRECTLY (as every test here does) — they
     do NOT implement real request dispatch or exception-handler invocation, so they can't
@@ -85,10 +85,10 @@ def _make_fastapi_pydantic_stubs():
             self.content = content or {}
 
     class FakeFastAPI:
-        def __init__(self, title=None):
+        def __init__(self, title=None, lifespan=None):
             self.title = title
+            self.lifespan = lifespan
             self.routes = {}
-            self._startup_handlers = []
             self._exception_handlers = {}
 
         def post(self, path, status_code=200):
@@ -100,13 +100,6 @@ def _make_fastapi_pydantic_stubs():
         def get(self, path):
             def deco(fn):
                 self.routes[("GET", path)] = fn
-                return fn
-            return deco
-
-        def on_event(self, name):
-            def deco(fn):
-                if name == "startup":
-                    self._startup_handlers.append(fn)
                 return fn
             return deco
 
@@ -1032,10 +1025,25 @@ def test_server_wiring_against_stub_fastapi():
             source_route = server_module.app.routes.get(("GET", "/source/{doc_id}"))
             source_result = await source_route("report-2026-solar") if source_route else None
 
-            return (result, detail, api_info, frontend_response, source_route, source_result)
+            # Actually enters/exits the lifespan context manager (not just checks it's
+            # non-None) — real structural proof the async-context-manager protocol works,
+            # replacing the old @app.on_event("startup") check after that was deprecated by
+            # FastAPI (see docs/Memory.md). InMemoryStateStore (the default here, no
+            # DATABASE_URL) has no init_schema method, so this mainly proves entry/exit doesn't
+            # raise — deeper verification of the actual schema-init call happens against real
+            # Postgres, manually, via run_demo_postgres.py.
+            lifespan_ran_without_error = True
+            try:
+                async with server_module.app.lifespan(server_module.app):
+                    pass
+            except Exception:
+                lifespan_ran_without_error = False
+
+            return (result, detail, api_info, frontend_response, source_route, source_result,
+                    lifespan_ran_without_error)
 
         (result, detail, api_info, frontend_response,
-         source_route, source_result) = asyncio.run(_inner())
+         source_route, source_result, lifespan_ran_without_error) = asyncio.run(_inner())
     finally:
         restore()
         if original_server is not None:
@@ -1063,8 +1071,9 @@ def test_server_wiring_against_stub_fastapi():
     check(source_result is not None and source_result["doc_id"] == "report-2026-solar"
           and "solar" in source_result["content"].lower(),
           "server.py: /source/{doc_id} returns the correct research document content")
-    check(len(server_module.app._startup_handlers) == 1,
-          "server.py: a startup handler is registered for state-store schema init")
+    check(server_module.app.lifespan is not None and lifespan_ran_without_error,
+          "server.py: a lifespan context manager (not deprecated on_event) is registered and "
+          "runs cleanly for state-store schema init")
 
 
 def test_fastapi_ingress_session_id_enables_cross_request_memory_recall():

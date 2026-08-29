@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent
@@ -114,8 +115,20 @@ research_orchestrator = AsyncOrchestrator(
     long_term_memory=long_term_memory,
 )
 
+
+@asynccontextmanager
+async def _lifespan(app):
+    # FastAPI's current recommended startup/shutdown pattern (replaced an earlier
+    # @app.on_event("startup"), deprecated — see docs/Memory.md). Everything before yield runs
+    # on startup; this app has no shutdown-side cleanup, so nothing runs after it.
+    if hasattr(state_store, "init_schema"):
+        await state_store.init_schema()
+    yield
+
+
 app = build_app(orchestrator, flow_registry,
-                 orchestrators_by_flow={"research-report": research_orchestrator})
+                 orchestrators_by_flow={"research-report": research_orchestrator},
+                 lifespan=_lifespan)
 
 
 @app.get("/source/{doc_id}")
@@ -170,12 +183,6 @@ async def api_info():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
-
-@app.on_event("startup")
-async def _on_startup():
-    if hasattr(state_store, "init_schema"):
-        await state_store.init_schema()
 
 
 if __name__ == "__main__":
