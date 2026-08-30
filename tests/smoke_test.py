@@ -1058,8 +1058,9 @@ def test_server_wiring_against_stub_fastapi():
           "server.py: POST /v1/runs completes a real run through the support agent flow")
     check(detail["tasks"]["draft_reply"]["result"] is not None,
           "server.py: GET /v1/runs/{id} returns the drafted reply")
-    check(sorted(api_info["flows_available"]) == ["customer-support-ticket", "research-report"],
-          "server.py: /api route reports both registered flows")
+    check(sorted(api_info["flows_available"]) ==
+          ["customer-support-ticket", "expense-approval", "research-report"],
+          "server.py: /api route reports all three registered flows")
     check(getattr(frontend_response, "path", None) is not None and
           str(frontend_response.path).endswith("frontend/index.html") or
           str(frontend_response.path).endswith("frontend\\index.html"),
@@ -1074,6 +1075,80 @@ def test_server_wiring_against_stub_fastapi():
     check(server_module.app.lifespan is not None and lifespan_ran_without_error,
           "server.py: a lifespan context manager (not deprecated on_event) is registered and "
           "runs cleanly for state-store schema init")
+
+
+def test_expense_approval_flow_queues_and_completes_via_approve_route():
+    """Regression test for the expense-approval flow's REST wiring: POST /v1/runs for a flow
+    with a Task(requires_approval=True) must NOT block waiting for a human — it should respond
+    immediately with status "queued", not "succeeded" (unlike every other flow). Then
+    POST /v1/runs/{run_id}/approve must resolve it. Verifies the "background task + on_created
+    callback" design actually works through server.py's real wiring, not just in isolation."""
+    fake_fastapi, fake_pydantic, _FakeHTTPException, _FakeBaseModel = _make_fastapi_pydantic_stubs()
+    restore = _install_fastapi_pydantic_stubs(fake_fastapi, fake_pydantic)
+    original_server = sys.modules.get("server")
+    sys.modules.pop("server", None)
+
+    saved_env = {k: os.environ.pop(k, None) for k in
+                 ["GEMINI_API_KEY", "ANTHROPIC_API_KEY", "DATABASE_URL"]}
+
+    try:
+        import server as server_module
+
+        async def _inner():
+            create_run = server_module.app.routes[("POST", "/v1/runs")]
+            approve_run = server_module.app.routes.get(("POST", "/v1/runs/{run_id}/approve"))
+            get_run = server_module.app.routes[("GET", "/v1/runs/{run_id}")]
+
+            body = _FakeBaseModel(
+                flow_name="expense-approval",
+                inputs={"employee_id": "emp-dana", "amount": 40.0, "category": "meals",
+                        "description": "Working lunch"},
+                session_id="emp-dana",
+            )
+            immediate = await create_run(body)
+
+            waiting_detail = None
+            for _ in range(200):
+                waiting_detail = await get_run(immediate["run_id"])
+                if waiting_detail["status"] == "waiting":
+                    break
+                await asyncio.sleep(0.01)
+
+            approve_body = _FakeBaseModel(task_name="request_approval", approved=True)
+            approve_result = (await approve_run(immediate["run_id"], approve_body)
+                               if approve_run else None)
+
+            final_detail = None
+            for _ in range(200):
+                final_detail = await get_run(immediate["run_id"])
+                if final_detail["status"] in ("succeeded", "failed"):
+                    break
+                await asyncio.sleep(0.01)
+
+            return immediate, waiting_detail, approve_result, final_detail
+
+        immediate, waiting_detail, approve_result, final_detail = asyncio.run(_inner())
+    finally:
+        restore()
+        if original_server is not None:
+            sys.modules["server"] = original_server
+        else:
+            sys.modules.pop("server", None)
+        for k, v in saved_env.items():
+            if v is not None:
+                os.environ[k] = v
+
+    check(immediate["status"] == "queued",
+          "POST /v1/runs for an approval-gated flow responds immediately with status "
+          "'queued', not blocking on human approval")
+    check(waiting_detail is not None and waiting_detail["status"] == "waiting",
+          "the run genuinely reaches 'waiting' status (RunStatus.WAITING) before being approved")
+    check(approve_result is not None and approve_result["approved"] is True,
+          "server.py registers POST /v1/runs/{run_id}/approve")
+    check(final_detail is not None and final_detail["status"] == "succeeded",
+          "approving the run lets it complete successfully")
+    check(final_detail["tasks"]["record_decision"]["result"] == "recorded",
+          "the approved expense's decision is recorded")
 
 
 def test_fastapi_ingress_session_id_enables_cross_request_memory_recall():
@@ -1223,6 +1298,7 @@ if __name__ == "__main__":
         test_anthropic_provider_wiring_against_stub_client,
         test_gemini_provider_wiring_against_stub_client,
         test_server_wiring_against_stub_fastapi,
+        test_expense_approval_flow_queues_and_completes_via_approve_route,
         test_fastapi_ingress_session_id_enables_cross_request_memory_recall,
         test_fastapi_ingress_run_request_body_is_module_level,
     ]:

@@ -16,12 +16,17 @@ See `/docs` for the project docs:
 - `Memory.md` — (added once coding starts) running build progress/context
 
 ## Status
-All 9 phases are done: core flow model, async orchestrator + state store, REST ingress +
-queue-driven executor workers + output actions, tools registry, short-term + long-term memory,
+All 9 original phases are done: core flow model, async orchestrator + state store, REST ingress
++ queue-driven executor workers + output actions, tools registry, short-term + long-term memory,
 guardrails + observability, an Airflow adapter + documented Camel route, 2 reference agents, and
 a finalized design doc + real measured benchmarks + human-in-the-loop pause/resume — see
 `docs/Memory.md` for full details and every deviation from the original design, and
 `docs/Architecture.md`/`docs/Design.md` (§6 in each) for the as-built summary.
+
+Beyond the original 9 phases: a live public deployment (see `DEPLOY.md`), a frontend, CI, and a
+**third reference agent** — Expense Approval — built specifically to demonstrate Phase 9's
+human-in-the-loop pause/resume, which neither of the original two agents actually used despite
+it being built and tested since Phase 9. See `examples/expense_approval_agent/README.md`.
 
 A real LLM provider has also been added — both **Gemini** (`GeminiLLMProvider`, free tier, no
 billing) and **Anthropic** (`AnthropicLLMProvider`) — swap either into any reference agent (or
@@ -38,8 +43,9 @@ python3 run_demo_phase7.py     # Phase 7: Flow -> Airflow DAG compile + simulate
 python3 examples/customer_support_agent/run.py   # Phase 8, reference agent 1
 python3 examples/research_agent/run.py           # Phase 8, reference agent 2 (real reflection pass)
 python3 run_demo_phase9.py     # Phase 9: human-in-the-loop pause/resume
+python3 examples/expense_approval_agent/run.py   # reference agent 3 (approve/reject/reject over real memory)
 python3 benchmarks/run_benchmarks.py   # Phase 9: real measured perf numbers
-python3 tests/smoke_test.py    # dependency-free test suite (53 checks)
+python3 tests/smoke_test.py    # dependency-free test suite (69 checks)
 ```
 
 ## Running against a real LLM

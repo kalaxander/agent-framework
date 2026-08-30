@@ -456,10 +456,98 @@ codebase or guess at decisions. Update this after each meaningful step.
      (Architecture.md's deviations section covers the research agent's reflection-loop
      deviation, but never separately called out deployment exposure, so no change needed there).
   This closes every item on the original Phase B "closing 1-2 documented design gaps" list.
-- Remaining roadmap: Phase C — a third, more ambitious agent built using this project's own
-  framework, plus presenting the docs for an audience (the user's mentor). Given everything in
-  Phase A/B is now done and verified live, Phase C is the natural next step whenever the user is
-  ready — no other loose ends outstanding as of this entry.
+- Remaining roadmap (as of the entry immediately above): Phase C — a third, more ambitious agent
+  built using this project's own framework, plus presenting the docs for an audience (the user's
+  mentor). Given everything in Phase A/B is done and verified live, Phase C is the natural next
+  step whenever the user is ready — no other loose ends outstanding as of that entry.
+- **Phase C started: third reference agent — Expense Approval Agent.** User picked this over an
+  Incident Triage alternative after I recommended it specifically because it's the only way to
+  demonstrate Phase 9's human-in-the-loop approval (`Task(requires_approval=True)` +
+  `AsyncOrchestrator.resume()`), which has sat built and tested since Phase 9 without either
+  original reference agent ever actually using it.
+  - **Note: the sandbox this work happens in reset mid-session** (all files under
+    `/home/claude/agent-framework` disappeared between one turn and the next). Recovered cleanly
+    by `git clone`-ing the user's own GitHub repo directly (`github.com`/`codeload.github.com`
+    are reachable) rather than asking the user to re-upload anything — confirmed the clone's
+    commit history and local test results matched exactly where things stood before the reset,
+    then redid the (already-designed) Expense Approval Agent work from scratch against the
+    freshly-cloned repo. Worth remembering: if this happens again, git clone the user's repo
+    first before assuming anything is lost — everything already pushed is safe there regardless
+    of what happens to this sandbox.
+  - **Real design problem found and solved before writing any code**: both existing reference
+    agents already register tools named "search"/"llm_call"; a third agent doing the same would
+    hit the exact ToolRegistry name-collision problem the research-agent work fixed earlier —
+    solved the same way, a third `AsyncOrchestrator`/`ToolRegistry` pair sharing the common
+    `state_store`.
+  - **A genuinely new, non-trivial problem this agent surfaced**: `AsyncOrchestrator.run()`
+    suspends on a REAL `asyncio.Event` when it hits an approval-gated task (confirmed by reading
+    `run_demo_phase9.py`, the original Phase 9 demo, which schedules `run()` via
+    `asyncio.create_task` and learns `run_id` by directly peeking at the state_store — a
+    demo-only shortcut that doesn't work for a real REST API, since there's no "the only run in
+    the store" assumption to lean on there). This means `POST /v1/runs` cannot simply `await`
+    an approval-gated flow to completion the way it does every other flow, or the HTTP request
+    would hang indefinitely.
+  - **Fix, made as a small additive change to core/orchestrator.py** (not worked around at the
+    REST layer): `run()` gained an optional `on_created: Optional[Callable] = None` parameter,
+    called with the new run_id immediately after the RunRecord is created — before any task
+    executes, before any blocking. Default `None`, zero behavior change for every existing
+    caller; confirmed via `run_demo_phase9.py` still passing unchanged and the full smoke suite
+    still green before touching anything else.
+  - **`fastapi_ingress.py`**: added a module-level `ApproveRequestBody` (learned the RunRequestBody
+    lesson — module level from the start, not inside a function). `create_run` now checks
+    `any(t.requires_approval for t in flow.tasks.values())`; non-approval flows keep the
+    original synchronous behavior completely unchanged, approval flows get scheduled as a
+    background `asyncio.Task` and the handler returns `{"run_id", "status": "queued"}` as soon
+    as `on_created` fires (via an `asyncio.Event`, not a sleep-polling loop). New
+    `POST /v1/runs/{run_id}/approve` route looks up which orchestrator actually owns the run via
+    `orchestrators_by_flow[run.flow_name]` (same mechanism `create_run` itself already used) and
+    calls `.resume()` on it. The background task's own exception (if any) is deliberately
+    swallowed with a comment explaining why: the failure is already correctly recorded in
+    state_store by `run()` itself before re-raising, and nothing else observes this task's
+    result — this just avoids a noisy, misleading "Task exception was never retrieved" warning
+    for something that isn't actually a problem.
+  - **Verified the REST-layer design for real, twice, before trusting it**: once as a pure-Python
+    simulation of `create_run`/`approve_run`'s exact logic (no FastAPI at all) against a real
+    orchestrator/flow, and again after the sandbox reset against the freshly recreated files —
+    both times confirmed the full real sequence (queued -> waiting -> approve -> succeeded)
+    actually works, not just "looks correct on read-through."
+  - **New agent**: `examples/expense_approval_agent/` (`agent.py`, `run.py`, `README.md`).
+    Flow: search company expense policy -> recall employee's expense history (long-term memory,
+    `session_id = employee_id`, same convention as the support agent's `customer_id`) -> LLM
+    writes an advisory assessment -> human approval gate (unconditional — every submission
+    requires sign-off, not just large ones; documented explicitly as a deliberate design choice
+    given `Task.requires_approval` is set once at flow-definition time, not evaluated per run,
+    plus a genuinely normal real expense-policy pattern on its own) -> record decision to
+    memory. Ran `run.py` for real (not just read through it) after every recreation — three
+    passes (approved, rejected, second approval showing cross-run memory recall of the first) —
+    confirmed working both before and after the sandbox reset.
+  - **New tests, real regression coverage**: `smoke_test.py` gained
+    `test_expense_approval_flow_queues_and_completes_via_approve_route` (stub-based, calls the
+    real route functions directly) — deliberately removed the `approve_run` route and confirmed
+    this test genuinely fails before restoring it and confirming 69/69 pass, stable across 3
+    runs. `test_server_integration.py` gained 3 new tests using the real live-uvicorn `client`
+    fixture (approve/complete, reject/fail, unknown-run-id 404) — could not execute these myself
+    (no fastapi/uvicorn in this sandbox, same limitation as always), but hand-verified the exact
+    response shapes each assertion depends on (the rejection error string, in particular) by
+    running the real orchestrator logic standalone and printing the actual `get_run`-equivalent
+    dict before trusting the assertion against it.
+  - **Docs updated**: `server.py`/`fastapi_ingress.py` docstrings describe the final 3-agent,
+    background-task design (not a "not done yet" note). `Architecture.md`'s as-built deviations
+    section gained a new entry (#8) for the third agent — did NOT edit `PRD.md`'s "at least two
+    reference agents" line, since that's the original requirement text, accurately describing
+    what was asked for; three exceeding two doesn't make the original line wrong. Fixed one
+    stale claim found along the way in `DEPLOY.md` ("research agent isn't exposed on the
+    deployed server yet") — that gap was actually closed in an earlier session; DEPLOY.md just
+    hadn't been updated to reflect it. Added a full "testing the expense approval agent over the
+    API" walkthrough to DEPLOY.md matching the format of the existing memory-recall walkthrough.
+  - **Not yet done**: the dispatch-desk frontend (`frontend/index.html`) has no UI for the
+    expense-approval flow's queued/waiting/approve interaction pattern yet — it's reachable via
+    `/docs` or direct API calls, just not through the visual frontend. Flagged to the user as an
+    open question rather than built without asking, since it's a real scope/design decision
+    (the queued->waiting->approve pattern is meaningfully different from the other two agents'
+    single-shot submit-and-see-result interaction, and deserves its own design thought rather
+    than a quick bolt-on). Not yet pushed to GitHub as of this entry — user has the zip and file
+    list but hasn't confirmed a push or run against a live deployment yet.
 
 ## Key Decisions / Deviations From Original Docs
 - **Removed all Intel-specific scope (Intel DevCloud hosting, Intel OpenVINO model

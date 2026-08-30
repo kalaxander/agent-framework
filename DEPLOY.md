@@ -75,6 +75,28 @@ different ones) and each request gets its own isolated memory scope — that's t
 behavior, not a bug, but it means you need to explicitly pass a shared `session_id` to see
 cross-ticket recall in action.
 
+### Testing the expense approval agent (human-in-the-loop) over the API
+
+This flow is different from the other two: `POST /v1/runs` returns immediately with
+`"status": "queued"`, not `"succeeded"` — the flow genuinely pauses partway through and waits
+for a real approval before it can finish.
+
+1. `POST /v1/runs`:
+   ```json
+   {"flow_name": "expense-approval", "inputs": {"employee_id": "emp-1", "amount": 45.00, "category": "meals", "description": "Team lunch"}, "session_id": "emp-1"}
+   ```
+   Copy the returned `run_id`.
+2. `GET /v1/runs/{run_id}` — should show `"status": "waiting"` and an LLM-written assessment
+   under the `assess_expense` task.
+3. `POST /v1/runs/{run_id}/approve`:
+   ```json
+   {"task_name": "request_approval", "approved": true}
+   ```
+4. `GET /v1/runs/{run_id}` again — should now show `"status": "succeeded"`.
+
+Try `"approved": false` on a second submission too — status should come back `"failed"`, with
+`request_approval`'s task error reading `"rejected by human-in-the-loop approval"`.
+
 ## Worth knowing before demo day
 
 - **Render's free tier spins down after ~15 minutes of no traffic**, and the first request after
@@ -83,8 +105,9 @@ cross-ticket recall in action.
 - If you set `DATABASE_URL`, runs really do persist in your real Postgres — you can restart the
   Render service and a previous `run_id` will still be retrievable via `GET /v1/runs/{run_id}`.
   That's a good thing to actually demonstrate, not just claim.
-- The research agent isn't exposed on the deployed server yet (see `server.py`'s docstring for
-  why) — only `customer-support-ticket`. That's a known, documented gap, not an oversight.
+- All three reference agents (`customer-support-ticket`, `research-report`, `expense-approval`)
+  are exposed on the deployed server. The dispatch-desk frontend (`/`) currently only has a form
+  for the support agent — the other two are reachable via `/docs` or direct API calls.
 
 ## Troubleshooting
 

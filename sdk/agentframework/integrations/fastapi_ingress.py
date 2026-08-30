@@ -42,9 +42,24 @@ raise (GuardrailViolation, ApprovalRejected, TaskTimeoutError, ToolError, Memory
 have propagated as a raw, unhandled 500 with none of the caller-useful `retryable` signal this
 project's own error hierarchy was designed to carry. The global handlers fix that uniformly
 instead of requiring every route to remember to catch every possible error type itself.
+
+Human-in-the-loop (Phase 9, see docs/Memory.md): a flow containing a Task(requires_approval=True)
+genuinely suspends orchestrator.run() on a real asyncio.Event until AsyncOrchestrator.resume()
+is called — so create_run CANNOT simply `await` such a flow to completion the way it does for
+every other flow, or the HTTP request would hang until a human acts (or a client/gateway
+timeout hits first). create_run detects this up front (any task in the built Flow has
+requires_approval=True) and, only for those flows, schedules orchestrator.run() as a background
+asyncio.Task instead of awaiting it directly — using the run_id it learns immediately via the
+`on_created` callback (added to AsyncOrchestrator.run() specifically for this) to respond with
+{"run_id", "status": "queued"} right away. A new POST /v1/runs/{run_id}/approve route then calls
+resume() on whichever orchestrator actually owns that run (looked up via
+orchestrators_by_flow[run.flow_name], same mechanism create_run itself uses to route runs).
+Every other, non-approval flow keeps the original synchronous behavior unchanged — no observable
+difference for the existing customer-support/research agents.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional
 
 from agentframework.core.orchestrator import AsyncOrchestrator
@@ -65,6 +80,10 @@ if _IMPORT_ERROR is None:
         flow_name: str
         inputs: dict[str, Any] = Field(default_factory=dict)
         session_id: Optional[str] = None
+
+    class ApproveRequestBody(BaseModel):
+        task_name: str
+        approved: bool
 
 
 # Status code per AgentFrameworkError subclass name — anything not listed falls back to 500.
@@ -116,8 +135,45 @@ def build_app(orchestrator: AsyncOrchestrator, flow_registry: FlowRegistry,
         # above, uniformly, without every route needing to remember every error type.
         flow = flow_registry.build(body.flow_name)
         active_orchestrator = orchestrators_by_flow.get(body.flow_name, orchestrator)
-        run = await active_orchestrator.run(flow, body.inputs, session_id=body.session_id)
-        return {"run_id": run.run_id, "status": run.status.value}
+
+        needs_approval = any(t.requires_approval for t in flow.tasks.values())
+        if not needs_approval:
+            run = await active_orchestrator.run(flow, body.inputs, session_id=body.session_id)
+            return {"run_id": run.run_id, "status": run.status.value}
+
+        # This flow will suspend on a real asyncio.Event partway through — awaiting it here
+        # would hang the HTTP request until a human calls /approve, so it's scheduled in the
+        # background instead, and this handler responds as soon as the run_id is known.
+        created = asyncio.Event()
+        captured: dict[str, str] = {}
+
+        def _on_created(run_id: str):
+            captured["run_id"] = run_id
+            created.set()
+
+        async def _run_in_background():
+            try:
+                await active_orchestrator.run(flow, body.inputs, session_id=body.session_id,
+                                               on_created=_on_created)
+            except Exception:
+                # Already recorded as FAILED in the state_store by orchestrator.run() itself
+                # before re-raising — nothing here is watching this task's own result/exception,
+                # so this just prevents an unhelpful "Task exception was never retrieved"
+                # warning for something that's already correctly reflected in run status.
+                pass
+
+        asyncio.create_task(_run_in_background())
+        await asyncio.wait_for(created.wait(), timeout=10.0)
+        return {"run_id": captured["run_id"], "status": "queued"}
+
+    @app.post("/v1/runs/{run_id}/approve")
+    async def approve_run(run_id: str, body: ApproveRequestBody):
+        run = await orchestrator.state_store.get_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        active_orchestrator = orchestrators_by_flow.get(run.flow_name, orchestrator)
+        await active_orchestrator.resume(run_id, body.task_name, approved=body.approved)
+        return {"run_id": run_id, "task_name": body.task_name, "approved": body.approved}
 
     @app.get("/v1/runs/{run_id}")
     async def get_run(run_id: str):

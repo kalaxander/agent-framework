@@ -16,16 +16,20 @@ Local run:
 Deployment (Render/Railway, see DEPLOY.md): build with `pip install -r requirements.txt`,
 start with `uvicorn server:app --host 0.0.0.0 --port $PORT`.
 
-Exposes both reference agents: `customer-support-ticket` and `research-report`. The research
-agent's `fetch_top_source` tool needs a real URL to fetch from — this app serves its own source
-index at `/source/{doc_id}` (matching examples/research_agent/run.py's local stub server's exact
-path and response shape — agent.py hardcodes the path suffix, only the base URL is actually
-configurable) and points the flow's `source_base_url` at its own loopback address, so the fetch
-is still a genuine HTTP round-trip through a real socket, just to itself rather than an external
-stub process. Runs on a SEPARATE AsyncOrchestrator instance from the support agent (same
-state_store, different tool_registry) — see fastapi_ingress.py's docstring for why merging both
-agents' tools into one registry isn't safe (both register tools named "search" and "llm_call"
-backed by different documents; ToolRegistry silently overwrites on name collision).
+Exposes three reference agents: `customer-support-ticket`, `research-report`, and
+`expense-approval`. The research agent's `fetch_top_source` tool needs a real URL to fetch from
+— this app serves its own source index at `/source/{doc_id}` (matching examples/research_agent/
+run.py's local stub server's exact path and response shape — agent.py hardcodes the path suffix,
+only the base URL is actually configurable) and points the flow's `source_base_url` at its own
+loopback address, so the fetch is still a genuine HTTP round-trip through a real socket, just to
+itself rather than an external stub process. `expense-approval` genuinely pauses (RunStatus.
+WAITING) on every submission until a human calls `POST /v1/runs/{run_id}/approve` — see
+fastapi_ingress.py's docstring for how create_run detects this and schedules the run in the
+background instead of blocking the HTTP request on it. All three run on SEPARATE
+AsyncOrchestrator instances (same shared state_store, different tool_registry each) — see
+fastapi_ingress.py's docstring for why merging their tools into one registry isn't safe (all
+three register tools named "search" and/or "llm_call" backed by different documents;
+ToolRegistry silently overwrites on name collision).
 
 Known limitation: long-term memory (customer ticket history) always uses
 `InMemoryLongTermMemory`, even when `DATABASE_URL` gives real Postgres for run state — so a
@@ -57,6 +61,8 @@ from agentframework.tools.llm_tool import MockLLMProvider
 
 from examples.customer_support_agent.agent import build_flow as build_support_flow
 from examples.customer_support_agent.agent import build_tool_registry as build_support_tools
+from examples.expense_approval_agent.agent import build_flow as build_expense_flow
+from examples.expense_approval_agent.agent import build_tool_registry as build_expense_tools
 from examples.research_agent.agent import SOURCES as RESEARCH_SOURCES
 from examples.research_agent.agent import build_flow as build_research_flow
 from examples.research_agent.agent import build_tool_registry as build_research_tools
@@ -89,13 +95,14 @@ llm_provider = _get_llm_provider()
 state_store = _get_state_store()
 long_term_memory = InMemoryLongTermMemory()
 
-# Both agents' tools can't share one ToolRegistry (see fastapi_ingress.py docstring: both
-# register "search" and "llm_call" tools backed by different documents, and ToolRegistry
-# silently overwrites on name collision) — so each gets its own registry and orchestrator,
-# sharing the same state_store/long_term_memory so GET /v1/runs/{id} works for either flow's
-# runs regardless of which orchestrator actually executed it.
+# All three agents' tools can't share one ToolRegistry (see fastapi_ingress.py docstring: all
+# three register "search" and/or "llm_call" tools backed by different documents, and
+# ToolRegistry silently overwrites on name collision) — so each gets its own registry and
+# orchestrator, sharing the same state_store/long_term_memory so GET /v1/runs/{id} works for
+# any flow's runs regardless of which orchestrator actually executed it.
 support_tools = build_support_tools(llm_provider=llm_provider)
 research_tools = build_research_tools(llm_provider=llm_provider)
+expense_tools = build_expense_tools(llm_provider=llm_provider)
 
 port = int(os.environ.get("PORT", 8000))
 _source_base_url = f"http://127.0.0.1:{port}"
@@ -103,6 +110,7 @@ _source_base_url = f"http://127.0.0.1:{port}"
 flow_registry = FlowRegistry()
 flow_registry.register("customer-support-ticket", build_support_flow)
 flow_registry.register("research-report", lambda: build_research_flow(_source_base_url))
+flow_registry.register("expense-approval", build_expense_flow)
 
 orchestrator = AsyncOrchestrator(
     state_store=state_store,
@@ -112,6 +120,11 @@ orchestrator = AsyncOrchestrator(
 research_orchestrator = AsyncOrchestrator(
     state_store=state_store,
     tool_registry=research_tools,
+    long_term_memory=long_term_memory,
+)
+expense_orchestrator = AsyncOrchestrator(
+    state_store=state_store,
+    tool_registry=expense_tools,
     long_term_memory=long_term_memory,
 )
 
@@ -127,7 +140,8 @@ async def _lifespan(app):
 
 
 app = build_app(orchestrator, flow_registry,
-                 orchestrators_by_flow={"research-report": research_orchestrator},
+                 orchestrators_by_flow={"research-report": research_orchestrator,
+                                        "expense-approval": expense_orchestrator},
                  lifespan=_lifespan)
 
 
@@ -176,6 +190,19 @@ async def api_info():
                 "flow_name": "research-report",
                 "inputs": {"question": "renewable energy adoption trends"},
             },
+        },
+        "expense_example_request": {
+            "method": "POST",
+            "url": "/v1/runs",
+            "body": {
+                "flow_name": "expense-approval",
+                "inputs": {"employee_id": "emp-alice", "amount": 45.00, "category": "meals",
+                           "description": "Team lunch"},
+                "session_id": "same employee's id — reuse it to build expense history",
+            },
+            "note": "this flow always pauses (status: 'waiting') until a human calls "
+                    "POST /v1/runs/{run_id}/approve with {\"task_name\": \"request_approval\", "
+                    "\"approved\": true/false}",
         },
     }
 

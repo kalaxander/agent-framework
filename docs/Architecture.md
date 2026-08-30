@@ -144,3 +144,12 @@ agent-framework/
    `AsyncOrchestrator.resume()`, a real `asyncio.Event`-based suspend/resume) — this was listed
    only as a stretch goal but was small enough to complete, closing out the previously-stubbed
    `RunStatus.WAITING`.
+8. **A third reference agent was built beyond the PRD's minimum of two** — Expense Approval
+   (`examples/expense_approval_agent/`). Not required, but item 7's human-in-the-loop capability
+   sat built and tested since Phase 9 without either original reference agent ever actually
+   using it; this agent exists specifically to demonstrate it working end to end, including over
+   the deployed REST API (which required a genuine, non-trivial extension: `POST /v1/runs`
+   cannot simply await a flow that suspends mid-run without hanging the HTTP request — see
+   `integrations/fastapi_ingress.py`'s docstring for the background-task/`on_created`-callback
+   design this required, and `docs/Memory.md` for the full story, including a real path-mismatch
+   bug this same design work caught before it shipped for the research agent's source route).

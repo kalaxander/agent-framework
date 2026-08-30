@@ -77,12 +77,26 @@ class AsyncOrchestrator:
             event.set()
 
     async def run(self, flow: Flow, inputs: dict[str, Any],
-                   session_id: Optional[str] = None) -> RunRecord:
+                   session_id: Optional[str] = None,
+                   on_created: Optional[Any] = None) -> RunRecord:
+        """`on_created`, if given, is called with the new run_id right after the RunRecord is
+        created (before any task executes) — additive, backward-compatible (default None,
+        zero behavior change for every existing caller). Exists specifically for callers that
+        need the run_id immediately without waiting for full completion: a flow containing a
+        Task(requires_approval=True) genuinely suspends run() on a real asyncio.Event until
+        AsyncOrchestrator.resume() is called (Phase 9) — a caller awaiting run() directly would
+        block indefinitely (or until an HTTP client/gateway timeout, over a REST API) with no
+        way to learn the run_id needed to actually call resume(). See fastapi_ingress.py's
+        create_run for the real caller: it schedules run() as a background asyncio.Task and
+        uses on_created (via an asyncio.Event) to return {"run_id", "status": "queued"}
+        immediately instead of hanging the HTTP request on human approval."""
         flow.validate()
         run = RunRecord.new(flow.name, inputs)
         for name in flow.tasks:
             run.tasks[name] = TaskState(name=name)
         await self.state_store.create_run(run)
+        if on_created is not None:
+            on_created(run.run_id)
         await self.state_store.update_run_status(run.run_id, RunStatus.RUNNING)
         if self.logger:
             self.logger.log("run_started", run_id=run.run_id, flow_name=flow.name)

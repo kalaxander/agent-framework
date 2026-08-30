@@ -2,7 +2,7 @@
 
 Unlike tests/smoke_test.py's stub-based `test_server_wiring_against_stub_fastapi`, this uses the
 REAL fastapi/pydantic packages via a genuinely live uvicorn server (not FastAPI's TestClient's
-default in-process ASGI transport). This matters twice over:
+default in-process ASGI transport). This matters in several ways:
 - It exercises Pydantic's actual OpenAPI schema generator — exactly where this project's real
   production bug lived (RunRequestBody originally defined inside build_app(), breaking real
   schema generation with a "class not fully defined" error that only surfaced on a live Render
@@ -15,6 +15,11 @@ default in-process ASGI transport). This matters twice over:
   concern: writing this test caught a real bug before it shipped (server.py's route was first
   registered at the wrong path, `/internal/source/{doc_id}`, while the flow itself hardcodes
   `/source/{doc_id}` — see docs/Memory.md).
+- The expense-approval flow's create_run schedules a REAL asyncio background task and returns
+  before it completes — a stub that calls route functions directly can exercise the logic, but
+  only a real live server + real concurrent HTTP requests can prove the actual timing/scheduling
+  genuinely works end to end (POST returns "queued" immediately, a concurrent poll sees
+  "waiting", POST /approve unblocks it for real).
 
 Requires the `server` extra plus httpx:
     cd sdk && pip install -e ".[server]" && pip install httpx pytest && cd ..
@@ -118,6 +123,7 @@ def test_api_info_route_reports_registered_flow(client):
     flows = resp.json()["flows_available"]
     assert "customer-support-ticket" in flows
     assert "research-report" in flows
+    assert "expense-approval" in flows
 
 
 def test_internal_source_route_serves_research_documents(client):
@@ -259,3 +265,93 @@ def test_session_id_enables_cross_request_memory_recall(client):
     recall = detail2["tasks"]["recall_history"]["result"]
     assert len(recall) >= 1
     assert "overcharged" in recall[0].lower()
+
+
+def test_expense_approval_flow_does_not_block_and_completes_via_approve(client):
+    """Real, live-server proof of the background-task design: POST /v1/runs for
+    expense-approval must return immediately with status "queued" — NOT block the HTTP request
+    until a human acts. This is exactly the scenario the `on_created` callback (added to
+    AsyncOrchestrator.run()) and create_run's background-scheduling logic exist for; only a
+    real live server (not the stub, which calls route functions directly with no actual
+    concurrency) can prove the timing genuinely works: the POST truly returns before the flow
+    reaches the approval gate, a separate poll genuinely sees "waiting", and POST /approve
+    genuinely unblocks the still-suspended background task."""
+    resp = client.post("/v1/runs", json={
+        "flow_name": "expense-approval",
+        "inputs": {"employee_id": "emp-live-test", "amount": 55.0, "category": "meals",
+                   "description": "Team lunch during a live CI test run"},
+        "session_id": "emp-live-test",
+    })
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "queued"  # the real point of this test: NOT "succeeded"
+    run_id = body["run_id"]
+
+    waiting = None
+    for _ in range(100):
+        detail = client.get(f"/v1/runs/{run_id}").json()
+        if detail["status"] == "waiting":
+            waiting = detail
+            break
+        time.sleep(0.05)
+    assert waiting is not None, "run never reached WAITING — background scheduling is broken"
+    assert waiting["tasks"]["assess_expense"]["result"]["response"]
+
+    approve_resp = client.post(f"/v1/runs/{run_id}/approve",
+                                json={"task_name": "request_approval", "approved": True})
+    assert approve_resp.status_code == 200
+    assert approve_resp.json() == {"run_id": run_id, "task_name": "request_approval",
+                                    "approved": True}
+
+    final = None
+    for _ in range(100):
+        final = client.get(f"/v1/runs/{run_id}").json()
+        if final["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.05)
+    assert final["status"] == "succeeded"
+    assert final["tasks"]["record_decision"]["result"] == "recorded"
+
+
+def test_expense_approval_flow_rejected_via_approve_endpoint(client):
+    """Same real live-server path as above, but for the rejection branch — confirms
+    ApprovalRejected (raised inside orchestrator.run()'s background task when resumed with
+    approved=False) correctly lands the run in "failed" status as seen through a real,
+    independent GET request, not just observed from inside the same process/coroutine."""
+    resp = client.post("/v1/runs", json={
+        "flow_name": "expense-approval",
+        "inputs": {"employee_id": "emp-live-reject", "amount": 9000.0, "category": "travel",
+                   "description": "Unapproved last-minute business class upgrade"},
+        "session_id": "emp-live-reject",
+    })
+    assert resp.status_code == 202
+    run_id = resp.json()["run_id"]
+
+    for _ in range(100):
+        detail = client.get(f"/v1/runs/{run_id}").json()
+        if detail["status"] == "waiting":
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("run never reached WAITING")
+
+    approve_resp = client.post(f"/v1/runs/{run_id}/approve",
+                                json={"task_name": "request_approval", "approved": False})
+    assert approve_resp.status_code == 200
+
+    final = None
+    for _ in range(100):
+        final = client.get(f"/v1/runs/{run_id}").json()
+        if final["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.05)
+    assert final["status"] == "failed"
+    assert final["tasks"]["request_approval"]["error"] == \
+        "rejected by human-in-the-loop approval"
+
+
+def test_approve_unknown_run_id_returns_404(client):
+    resp = client.post("/v1/runs/does-not-exist/approve",
+                        json={"task_name": "request_approval", "approved": True})
+    assert resp.status_code == 404
+    assert resp.json()["error_type"] == "HTTPException"
