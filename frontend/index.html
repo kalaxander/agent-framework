@@ -257,6 +257,69 @@
     margin-top: 14px;
   }
 
+  /* --- desk tabs (switch between the two agents) --- */
+  .desk-tabs {
+    display: flex;
+    gap: 22px;
+    margin-bottom: 20px;
+  }
+  .desk-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: rgba(239,231,216,0.5);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 4px 2px 10px;
+    cursor: pointer;
+  }
+  .desk-tab.active { color: var(--paper); border-bottom-color: var(--mustard); }
+  .desk-tab:hover:not(.active) { color: rgba(239,231,216,0.8); }
+  .desk-panel { display: none; }
+  .desk-panel.active { display: block; }
+
+  select {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--ink);
+    background: #fbf8f1;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 10px 12px;
+  }
+
+  /* --- interactive approval gate --- */
+  .stamp.waiting { color: var(--mustard); animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) {
+    .stamp.waiting { animation: none; }
+  }
+
+  .approval-actions { display: flex; gap: 10px; margin-top: 14px; }
+  .approval-btn {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 10px 12px;
+    border-radius: 2px;
+    cursor: pointer;
+    border: 1.5px solid currentColor;
+    background: transparent;
+  }
+  .approve-btn { color: var(--cobalt); }
+  .approve-btn:hover:not(:disabled) { background: rgba(42,75,124,0.12); }
+  .reject-btn { color: var(--stamp-red); }
+  .reject-btn:hover:not(:disabled) { background: rgba(163,51,31,0.08); }
+  .approval-btn:disabled { opacity: 0.4; cursor: progress; }
+  .approval-note { margin-top: 8px; font-size: 12px; color: var(--ink-soft); }
+
   footer {
     margin-top: 40px;
     font-size: 11px;
@@ -269,40 +332,89 @@
 <body>
   <div class="wrap">
     <header>
-      <div class="eyebrow">Agent Framework — Support Dispatch</div>
+      <div class="eyebrow">Agent Framework — Dispatch Desk</div>
       <h1>Dispatch Desk</h1>
       <div class="sub">
-        Submits a ticket to the <code>customer-support-ticket</code> flow and shows each
-        pipeline stage's actual result. Reuse a Customer ID across tickets to see the
-        long-term-memory recall stage find prior tickets. See <a href="/docs">/docs</a> for the raw API.
+        Two live agents, both built on the same framework. Submit a support ticket or an
+        expense — either way, every pipeline stage's real result shows below as it happens.
+        See <a href="/docs">/docs</a> for the raw API.
       </div>
     </header>
 
-    <form id="ticket-form">
-      <div class="field">
-        <label for="ticket_text">Ticket <span class="hint">what the customer wrote</span></label>
-        <textarea id="ticket_text" required placeholder="My package arrived damaged, I need a replacement or refund.">My package arrived damaged, I need a replacement or refund.</textarea>
-      </div>
-      <div class="row">
-        <div class="field">
-          <label for="session_id">Customer ID <span class="hint">optional</span></label>
-          <input type="text" id="session_id" placeholder="e.g. cust-42 — reuse to test memory recall">
-        </div>
-      </div>
-      <button type="submit" id="submit-btn">Route Ticket</button>
-    </form>
-
-    <div class="perf"></div>
-
-    <div id="manifest">
-      <div class="manifest-head">
-        <span>Routing Manifest</span>
-        <span class="run-id" id="run-id-label"></span>
-      </div>
-      <div id="stages"></div>
+    <div class="desk-tabs">
+      <button type="button" class="desk-tab active" data-desk="support">Support Ticket</button>
+      <button type="button" class="desk-tab" data-desk="expense">Expense Approval</button>
     </div>
 
-    <div id="error-container"></div>
+    <div class="desk-panel active" id="desk-support">
+      <form id="ticket-form">
+        <div class="field">
+          <label for="ticket_text">Ticket <span class="hint">what the customer wrote</span></label>
+          <textarea id="ticket_text" required placeholder="My package arrived damaged, I need a replacement or refund.">My package arrived damaged, I need a replacement or refund.</textarea>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="session_id">Customer ID <span class="hint">optional</span></label>
+            <input type="text" id="session_id" placeholder="e.g. cust-42 — reuse to test memory recall">
+          </div>
+        </div>
+        <button type="submit" id="submit-btn">Route Ticket</button>
+      </form>
+
+      <div class="perf"></div>
+
+      <div id="manifest">
+        <div class="manifest-head">
+          <span>Routing Manifest</span>
+          <span class="run-id" id="run-id-label"></span>
+        </div>
+        <div id="stages"></div>
+      </div>
+
+      <div id="error-container"></div>
+    </div>
+
+    <div class="desk-panel" id="desk-expense">
+      <form id="expense-form">
+        <div class="row">
+          <div class="field">
+            <label for="employee_id">Employee ID</label>
+            <input type="text" id="employee_id" required placeholder="e.g. emp-alice"
+                   value="emp-alice">
+          </div>
+          <div class="field">
+            <label for="amount">Amount <span class="hint">USD</span></label>
+            <input type="number" id="amount" required min="0" step="0.01" value="45.00">
+          </div>
+        </div>
+        <div class="field">
+          <label for="category">Category</label>
+          <select id="category">
+            <option value="meals">Meals</option>
+            <option value="travel">Travel</option>
+            <option value="software">Software</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="description">Description</label>
+          <textarea id="description" required placeholder="Team lunch during client visit">Team lunch during client visit</textarea>
+        </div>
+        <button type="submit" id="expense-submit-btn">Submit For Approval</button>
+      </form>
+
+      <div class="perf"></div>
+
+      <div id="expense-manifest">
+        <div class="manifest-head">
+          <span>Routing Manifest</span>
+          <span class="run-id" id="expense-run-id-label"></span>
+        </div>
+        <div id="expense-stages"></div>
+      </div>
+
+      <div id="expense-error-container"></div>
+    </div>
 
     <footer>agentframework — built from scratch, deployed for real</footer>
   </div>
@@ -343,6 +455,23 @@ function escapeHtml(str) {
   return d.innerHTML;
 }
 
+function errorMessage(body, res) {
+  // Typed error responses (see fastapi_ingress.py) return {"error_type","message","retryable"};
+  // fall back to older/raw shapes defensively rather than showing "undefined".
+  return (body && (body.message || body.detail)) || `Request failed (HTTP ${res.status})`;
+}
+
+// --- desk tab switching ---
+document.querySelectorAll('.desk-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.desk-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.desk-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('desk-' + tab.dataset.desk).classList.add('active');
+  });
+});
+
+// --- support ticket desk (single POST + GET, full result immediately) ---
 const form = document.getElementById('ticket-form');
 const submitBtn = document.getElementById('submit-btn');
 const manifest = document.getElementById('manifest');
@@ -350,8 +479,8 @@ const stagesEl = document.getElementById('stages');
 const runIdLabel = document.getElementById('run-id-label');
 const errorContainer = document.getElementById('error-container');
 
-function renderPendingStages() {
-  stagesEl.innerHTML = STAGE_DEFS.map(s => `
+function renderPendingStages(container, defs) {
+  container.innerHTML = defs.map(s => `
     <div class="stage pending" data-key="${s.key}">
       <div class="stage-top">
         <span class="stage-name">${s.label}</span>
@@ -362,16 +491,19 @@ function renderPendingStages() {
   `).join('');
 }
 
-function revealStage(stageEl, status, bodyHtml, index) {
+function revealStage(stageEl, status, bodyHtml, delayMs) {
   return new Promise(resolve => {
     setTimeout(() => {
       stageEl.className = 'stage ' + status;
-      stageEl.querySelector('.stamp').className = 'stamp ' + status;
-      stageEl.querySelector('.stamp').textContent =
-        status === 'done' ? 'Processed' : status === 'error' ? 'Failed' : 'Running';
+      const stampEl = stageEl.querySelector('.stamp');
+      stampEl.className = 'stamp ' + status;
+      stampEl.textContent = status === 'done' ? 'Processed'
+        : status === 'error' ? 'Failed'
+        : status === 'waiting' ? 'Awaiting approval'
+        : 'Running';
       stageEl.querySelector('.stage-body').innerHTML = bodyHtml;
       resolve();
-    }, index === 0 ? 120 : 420);
+    }, delayMs);
   });
 }
 
@@ -382,7 +514,7 @@ form.addEventListener('submit', async (e) => {
   submitBtn.textContent = 'Transmitting…';
 
   manifest.classList.add('show');
-  renderPendingStages();
+  renderPendingStages(stagesEl, STAGE_DEFS);
   runIdLabel.textContent = '';
 
   const ticketText = document.getElementById('ticket_text').value.trim();
@@ -400,16 +532,13 @@ form.addEventListener('submit', async (e) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.detail || `Request failed (HTTP ${res.status})`);
-    }
-    const created = await res.json();
+    const created = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(errorMessage(created, res));
     runIdLabel.textContent = created.run_id;
 
     const detailRes = await fetch(`/v1/runs/${created.run_id}`);
-    if (!detailRes.ok) throw new Error(`Could not retrieve run ${created.run_id}`);
-    const detail = await detailRes.json();
+    const detail = await detailRes.json().catch(() => ({}));
+    if (!detailRes.ok) throw new Error(errorMessage(detail, detailRes));
 
     const stageEls = STAGE_DEFS.map(s => stagesEl.querySelector(`[data-key="${s.key}"]`));
     for (let i = 0; i < STAGE_DEFS.length; i++) {
@@ -419,13 +548,177 @@ form.addEventListener('submit', async (e) => {
       const bodyHtml = task && task.status === 'succeeded'
         ? def.render(task.result)
         : `<div class="muted">${escapeHtml((task && task.error) || 'No data returned.')}</div>`;
-      await revealStage(stageEls[i], status, bodyHtml, i);
+      await revealStage(stageEls[i], status, bodyHtml, i === 0 ? 120 : 420);
     }
   } catch (err) {
     errorContainer.innerHTML = `<div class="error-banner"><strong>Undeliverable —</strong> ${escapeHtml(err.message)}</div>`;
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = 'Route Ticket';
+  }
+});
+
+// --- expense approval desk: POST returns "queued" immediately, then this polls GET until
+// "waiting" (showing the assessment + real Approve/Reject buttons), then polls again after a
+// decision until the run actually finishes. Mirrors exactly what a real client integrating
+// with this API has to do — see DEPLOY.md's "testing the expense approval agent" section. ---
+const expenseForm = document.getElementById('expense-form');
+const expenseSubmitBtn = document.getElementById('expense-submit-btn');
+const expenseManifest = document.getElementById('expense-manifest');
+const expenseStagesEl = document.getElementById('expense-stages');
+const expenseRunIdLabel = document.getElementById('expense-run-id-label');
+const expenseErrorContainer = document.getElementById('expense-error-container');
+
+const EXPENSE_STAGE_DEFS = [
+  { key: "search_policy", label: "Search Expense Policy",
+    render: (r) => {
+      const results = (r && r.results) || [];
+      if (!results.length) return '<div class="muted">No matching policy sections found.</div>';
+      return '<ul>' + results.map(d =>
+        `<li><strong>${escapeHtml(d.doc_id)}</strong> — ${escapeHtml(d.snippet)}</li>`
+      ).join('') + '</ul>';
+    }},
+  { key: "recall_history", label: "Recall Employee History",
+    render: (r) => {
+      const items = r || [];
+      if (!items.length) return '<div class="muted">No prior expenses on file for this employee.</div>';
+      return '<ul>' + items.map(t => `<li>${escapeHtml(t)}</li>`).join('') + '</ul>';
+    }},
+  { key: "assess_expense", label: "Assess Expense",
+    render: (r) => {
+      if (!r) return '<div class="muted">—</div>';
+      const usage = r.usage || {};
+      return `<div class="reply-box">
+        <div class="eyebrow">Assessment</div>
+        <div class="reply-text">${escapeHtml(r.response || "")}</div>
+        <div class="usage">${usage.tokens ?? "?"} tokens · $${(usage.cost ?? 0).toFixed(6)}</div>
+      </div>`;
+    }},
+];
+
+async function pollRun(runId, isDone, timeoutMs = 20000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await fetch(`/v1/runs/${runId}`);
+    const detail = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(errorMessage(detail, res));
+    if (isDone(detail)) return detail;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  throw new Error('Timed out waiting for the run to update.');
+}
+
+function renderApprovalGate(stageEl, assessment) {
+  stageEl.className = 'stage waiting';
+  const stampEl = stageEl.querySelector('.stamp');
+  stampEl.className = 'stamp waiting';
+  stampEl.textContent = 'Awaiting approval';
+  stageEl.querySelector('.stage-body').innerHTML = `
+    <div class="muted" style="margin-bottom:10px;">This submission genuinely pauses here —
+      a human has to decide, for real, before anything else runs.</div>
+    <div class="approval-actions">
+      <button type="button" class="approval-btn approve-btn" id="approve-btn">Approve</button>
+      <button type="button" class="approval-btn reject-btn" id="reject-btn">Reject</button>
+    </div>
+    <div class="approval-note" id="approval-note"></div>
+  `;
+}
+
+expenseForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  expenseErrorContainer.innerHTML = '';
+  expenseSubmitBtn.disabled = true;
+  expenseSubmitBtn.textContent = 'Transmitting…';
+
+  expenseManifest.classList.add('show');
+  const gateDef = { key: 'request_approval', label: 'Approval Gate' };
+  const recordDef = { key: 'record_decision', label: 'Record Decision' };
+  renderPendingStages(expenseStagesEl, [...EXPENSE_STAGE_DEFS, gateDef, recordDef]);
+  expenseRunIdLabel.textContent = '';
+
+  const employeeId = document.getElementById('employee_id').value.trim();
+  const amount = parseFloat(document.getElementById('amount').value);
+  const category = document.getElementById('category').value;
+  const description = document.getElementById('description').value.trim();
+
+  try {
+    const res = await fetch('/v1/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        flow_name: 'expense-approval',
+        inputs: { employee_id: employeeId, amount, category, description },
+        session_id: employeeId,
+      }),
+    });
+    const created = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(errorMessage(created, res));
+    const runId = created.run_id;
+    expenseRunIdLabel.textContent = runId;
+
+    // POST returned "queued" — the run is executing in the background. Poll until it reaches
+    // "waiting" (search_policy/recall_history/assess_expense all run before the approval gate).
+    const waitingDetail = await pollRun(runId, d => d.status === 'waiting' || d.status === 'failed');
+    if (waitingDetail.status === 'failed') {
+      throw new Error('Run failed before reaching approval — check /docs for details.');
+    }
+
+    const stageEls = EXPENSE_STAGE_DEFS.map(s => expenseStagesEl.querySelector(`[data-key="${s.key}"]`));
+    for (let i = 0; i < EXPENSE_STAGE_DEFS.length; i++) {
+      const def = EXPENSE_STAGE_DEFS[i];
+      const task = waitingDetail.tasks[def.key];
+      const status = !task ? 'error' : task.status === 'succeeded' ? 'done' : 'error';
+      const bodyHtml = task && task.status === 'succeeded'
+        ? def.render(task.result)
+        : `<div class="muted">${escapeHtml((task && task.error) || 'No data returned.')}</div>`;
+      await revealStage(stageEls[i], status, bodyHtml, i === 0 ? 120 : 420);
+    }
+
+    const gateEl = expenseStagesEl.querySelector('[data-key="request_approval"]');
+    renderApprovalGate(gateEl);
+
+    const decision = await new Promise(resolve => {
+      gateEl.querySelector('#approve-btn').addEventListener('click', () => resolve(true));
+      gateEl.querySelector('#reject-btn').addEventListener('click', () => resolve(false));
+    });
+
+    gateEl.querySelector('#approve-btn').disabled = true;
+    gateEl.querySelector('#reject-btn').disabled = true;
+    gateEl.querySelector('#approval-note').textContent = 'Recording decision…';
+
+    const approveRes = await fetch(`/v1/runs/${runId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_name: 'request_approval', approved: decision }),
+    });
+    const approveBody = await approveRes.json().catch(() => ({}));
+    if (!approveRes.ok) throw new Error(errorMessage(approveBody, approveRes));
+
+    const finalDetail = await pollRun(runId, d => d.status === 'succeeded' || d.status === 'failed');
+    const gateTask = finalDetail.tasks.request_approval;
+    const gateStatus = decision && gateTask.status === 'succeeded' ? 'done' : 'error';
+    const gateStamp = gateEl.querySelector('.stamp');
+    gateStamp.className = 'stamp ' + gateStatus;
+    gateStamp.textContent = decision ? 'Approved' : 'Rejected';
+    gateEl.className = 'stage ' + gateStatus;
+    gateEl.querySelector('#approval-note').textContent = decision
+      ? 'Approved — releasing to record the decision.'
+      : (gateTask.error || 'Rejected.');
+
+    const recordEl = expenseStagesEl.querySelector('[data-key="record_decision"]');
+    const recordTask = finalDetail.tasks.record_decision;
+    if (decision && recordTask && recordTask.status === 'succeeded') {
+      await revealStage(recordEl, 'done',
+        `<div class="muted">${escapeHtml(String(recordTask.result))}</div>`, 300);
+    } else {
+      await revealStage(recordEl, 'pending',
+        '<div class="muted">Not reached — the expense was rejected.</div>', 300);
+    }
+  } catch (err) {
+    expenseErrorContainer.innerHTML = `<div class="error-banner"><strong>Undeliverable —</strong> ${escapeHtml(err.message)}</div>`;
+  } finally {
+    expenseSubmitBtn.disabled = false;
+    expenseSubmitBtn.textContent = 'Submit For Approval';
   }
 });
 </script>
