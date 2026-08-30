@@ -660,7 +660,12 @@ expenseForm.addEventListener('submit', async (e) => {
     // "waiting" (search_policy/recall_history/assess_expense all run before the approval gate).
     const waitingDetail = await pollRun(runId, d => d.status === 'waiting' || d.status === 'failed');
     if (waitingDetail.status === 'failed') {
-      throw new Error('Run failed before reaching approval — check /docs for details.');
+      const failedTask = Object.entries(waitingDetail.tasks || {})
+        .find(([, t]) => t.status === 'failed');
+      const detail = failedTask
+        ? `"${failedTask[0]}" failed: ${failedTask[1].error || 'no error message recorded'}`
+        : 'no failed task found in the response — check /docs for the raw run detail.';
+      throw new Error(`Run failed before reaching approval (run_id: ${runId}) — ${detail}`);
     }
 
     const stageEls = EXPENSE_STAGE_DEFS.map(s => expenseStagesEl.querySelector(`[data-key="${s.key}"]`));
