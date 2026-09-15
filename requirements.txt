@@ -1,0 +1,23 @@
+# For deployment platforms (Render/Railway) that auto-detect Python apps via requirements.txt.
+# The framework's core (sdk/agentframework/core, io, tools, memory, guardrails, observability)
+# has zero required dependencies by design — everything below is only for server.py's specific
+# wiring: the REST server itself, real Postgres, and real Gemini.
+#
+# agentframework itself isn't pip-installed here — server.py adds sdk/ to sys.path directly
+# (same technique every demo script in this repo uses), so no packaging step is needed.
+#
+# NOTE: an earlier version of this file exact-pinned every package (fastapi==0.115.6,
+# pydantic==2.10.4, google-genai==2.19.0, ...) after a deploy hit a `/openapi.json` 500 that
+# was suspected to be a version-mismatch issue. That guess was wrong in a worse way: those
+# exact versions don't actually satisfy each other's real dependency constraints, and pip's
+# resolver correctly refused to install them at all (ResolutionImpossible). Hand-picking a
+# mutually-compatible exact version triple across 5 packages without running the actual
+# resolver is not reliable — reverted to minimum-version floors below and letting pip solve the
+# graph properly, which is what it's for. If a real version-specific bug is found later (via an
+# actual traceback, not a guess), tighten the specific package involved then — not preemptively.
+
+fastapi>=0.115
+pydantic>=2.10
+uvicorn[standard]>=0.34
+asyncpg>=0.30
+google-genai>=1.0

@@ -1,0 +1,46 @@
+[project]
+name = "agentframework"
+version = "0.1.0"
+description = "Build-your-own AI Agent Framework: composable task flows, orchestration, memory, guardrails, observability."
+requires-python = ">=3.11"
+dependencies = []
+# Core engine (core/, observability/, integrations/postgres_state_store.py behind a lazy
+# import) is stdlib-only by design — see the note at the top of core/flow.py. This keeps
+# `pip install -e .` (no extras) enough to run the orchestrator anywhere.
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+server = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic>=2.6",
+]
+kafka = [
+    "aiokafka>=0.10",
+]
+storage = [
+    "asyncpg>=0.29",
+]
+memory = [
+    "redis>=5.0",
+    "chromadb>=0.5",
+]
+airflow = [
+    "apache-airflow>=2.9",
+]
+llm = [
+    "anthropic>=0.40",
+]
+gemini = [
+    "google-genai>=1.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agentframework*"]

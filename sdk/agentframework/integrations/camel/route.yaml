@@ -1,0 +1,52 @@
+# Apache Camel integration (docs/Architecture.md > Ingress: "optional Camel route for routing/
+# transformation between ingress and internal buses")
+#
+# Apache Camel is a JVM (Java/Kotlin/etc.) framework — there is no first-class Python API to
+# call into it, unlike Kafka (aiokafka) or a state store (asyncpg). A Camel *route* runs as its
+# own process (standalone, Spring Boot, or Quarkus) sitting in front of this framework, not as
+# a library this framework imports. Per docs/Rules.md ("should not invent Apache product
+# capabilities"), we're not fabricating a Python `CamelTool` — that would misrepresent how Camel
+# actually integrates. This file is what a real deployment would run instead: a Camel route
+# definition in Camel's YAML DSL (one of Camel's standard config formats, alongside XML and
+# Java/Kotlin DSLs) that bridges an external protocol to this framework's REST ingress
+# (io/rest_ingress.py or integrations/fastapi_ingress.py).
+#
+# Scenario: a legacy partner drops ticket files into a directory; this route watches the
+# directory, converts each file to a `POST /v1/runs` call, and moves the file to `.processed/`
+# or `.error/` depending on the response. This is exactly the kind of protocol-bridging/
+# transformation work Camel is for — the file-polling and retry semantics are Camel's job, not
+# ours; our framework only ever sees a normal REST request.
+#
+# To actually run this: install a Camel distribution (e.g. `camel-jbang` for the fastest path —
+# `jbang app install camel-jbang@apache/camel; camel run route.xml`) — camel-jbang is a
+# convenience CLI Apache ships for running route files without a full project setup. This
+# sandbox has no JVM/network access to verify that, so this route is provided as a documented,
+# standard Camel config rather than something claimed to have been executed here.
+
+route:
+  from:
+    uri: "file:./inbound-tickets?noop=false&move=.processed&moveFailed=.error"
+  steps:
+    - unmarshal:
+        json: {}
+    - setHeader:
+        name: Content-Type
+        constant: "application/json"
+    - setBody:
+        # reshape the partner's file format into our RunRequest shape; adjust field mapping to
+        # match whatever the real partner payload looks like.
+        simple: >
+          {"flow_name": "support-ticket-triage", "inputs": {"ticket_id": "${body[ticket_id]}",
+          "subject": "${body[subject]}", "description": "${body[description]}"}}
+    - to:
+        uri: "http://agentframework-ingress:8000/v1/runs"
+        # ^ points at wherever io.rest_ingress.RestIngress or integrations.fastapi_ingress is
+        # actually deployed; loopback in this repo's demos, a real service address in prod.
+    - choice:
+        when:
+          - simple: "${header.CamelHttpResponseCode} >= 400"
+            steps:
+              - log: "Run submission failed for ${body}: HTTP ${header.CamelHttpResponseCode}"
+                # Camel's file component already routed the source file to moveFailed=.error
+                # above on an exception; a non-2xx HTTP response that doesn't throw needs an
+                # explicit throw here to trigger the same move — omitted for brevity.

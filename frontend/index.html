@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dispatch Desk — Agent Framework</title>
+<style>
+  :root {
+    --slate: #1B2430;
+    --slate-deep: #141B24;
+    --paper: #EFE7D8;
+    --paper-dim: #E3D9C4;
+    --ink: #23201B;
+    --ink-soft: #5A5346;
+    --cobalt: #2A4B7C;
+    --stamp-red: #A3331F;
+    --mustard: #C99A3F;
+    --rule: rgba(35, 32, 27, 0.18);
+    --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    --font-mono: "IBM Plex Mono", "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--slate);
+    background-image:
+      radial-gradient(circle at 15% 8%, rgba(201,154,63,0.06), transparent 40%),
+      radial-gradient(circle at 85% 92%, rgba(42,75,124,0.10), transparent 45%);
+    color: var(--paper);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+    padding: 32px 20px 80px;
+  }
+
+  a { color: var(--mustard); }
+
+  .wrap { max-width: 760px; margin: 0 auto; }
+
+  header {
+    border-bottom: 2px solid var(--paper-dim);
+    padding-bottom: 18px;
+    margin-bottom: 28px;
+  }
+
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--mustard);
+    margin-bottom: 8px;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(28px, 5vw, 40px);
+    margin: 0 0 6px;
+    color: var(--paper);
+    letter-spacing: 0.01em;
+  }
+
+  .sub {
+    color: rgba(239,231,216,0.6);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .sub code {
+    background: rgba(239,231,216,0.08);
+    padding: 1px 5px;
+    border-radius: 2px;
+    color: var(--paper);
+  }
+
+  /* --- ticket form (the paper slip) --- */
+  form {
+    background: var(--paper);
+    color: var(--ink);
+    border-radius: 3px;
+    padding: 22px 22px 20px;
+    box-shadow: 0 14px 34px rgba(0,0,0,0.35);
+    position: relative;
+  }
+
+  form::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 24px; right: 24px; height: 2px;
+    background: repeating-linear-gradient(90deg, var(--ink) 0 6px, transparent 6px 12px);
+    opacity: 0.18;
+  }
+
+  .field { margin-bottom: 16px; }
+
+  label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 6px;
+  }
+  label .hint { text-transform: none; letter-spacing: normal; font-size: 11px; opacity: 0.65; }
+
+  textarea, input[type="text"] {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--ink);
+    background: #fbf8f1;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 10px 12px;
+    resize: vertical;
+  }
+  textarea { min-height: 92px; }
+
+  textarea:focus, input:focus, button:focus-visible {
+    outline: 3px solid var(--cobalt);
+    outline-offset: 1px;
+  }
+
+  .row { display: flex; gap: 14px; flex-wrap: wrap; }
+  .row .field { flex: 1 1 220px; }
+
+  button[type="submit"] {
+    width: 100%;
+    background: var(--stamp-red);
+    color: var(--paper);
+    border: none;
+    border-radius: 2px;
+    padding: 13px 16px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-size: 13px;
+    cursor: pointer;
+    transition: transform 0.08s ease, background 0.15s ease;
+  }
+  button[type="submit"]:hover { background: #8c2a19; }
+  button[type="submit"]:active { transform: scale(0.99); }
+  button[type="submit"]:disabled { opacity: 0.55; cursor: progress; }
+
+  /* --- perforation between form and manifest --- */
+  .perf {
+    height: 22px;
+    background:
+      radial-gradient(circle 5px at 0 50%, var(--slate) 4px, transparent 5px),
+      radial-gradient(circle 5px at 100% 50%, var(--slate) 4px, transparent 5px);
+    position: relative;
+  }
+  .perf::before {
+    content: "";
+    position: absolute; top: 50%; left: 12px; right: 12px; height: 0;
+    border-top: 2px dashed rgba(239,231,216,0.35);
+  }
+
+  /* --- manifest / pipeline --- */
+  #manifest { display: none; }
+  #manifest.show { display: block; }
+
+  .manifest-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 14px;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(239,231,216,0.55);
+  }
+  .manifest-head .run-id { color: var(--mustard); }
+
+  .stage {
+    background: var(--paper);
+    color: var(--ink);
+    border-radius: 3px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    position: relative;
+    opacity: 0;
+    transform: translateY(6px);
+    animation: stage-in 0.35s ease forwards;
+    border-left: 4px solid var(--rule);
+  }
+  .stage.pending { border-left-color: var(--rule); }
+  .stage.running { border-left-color: var(--cobalt); }
+  .stage.done { border-left-color: var(--stamp-red); }
+  .stage.error { border-left-color: var(--stamp-red); background: #f7e3df; }
+
+  @keyframes stage-in {
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stage { animation: none; opacity: 1; transform: none; }
+  }
+
+  .stage-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .stage-name {
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .stamp {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 2px 8px;
+    border-radius: 2px;
+    border: 1.5px solid currentColor;
+    transform: rotate(-3deg);
+  }
+  .stamp.pending { color: var(--ink-soft); opacity: 0.5; }
+  .stamp.running { color: var(--cobalt); }
+  .stamp.done { color: var(--stamp-red); }
+  .stamp.error { color: var(--stamp-red); }
+
+  .stage-body { font-size: 13px; line-height: 1.55; color: var(--ink); }
+  .stage-body .muted { color: var(--ink-soft); font-size: 12px; }
+  .stage-body ul { margin: 4px 0 0; padding-left: 18px; }
+  .stage-body li { margin-bottom: 3px; }
+
+  .reply-box {
+    background: var(--slate-deep);
+    color: var(--paper);
+    border: 1px solid rgba(201,154,63,0.35);
+    border-radius: 3px;
+    padding: 18px;
+    margin-top: 16px;
+  }
+  .reply-box .eyebrow { margin-bottom: 10px; }
+  .reply-text { white-space: pre-wrap; line-height: 1.6; font-size: 14px; color: var(--paper); }
+  .usage {
+    margin-top: 12px;
+    font-size: 11px;
+    color: rgba(239,231,216,0.5);
+    letter-spacing: 0.04em;
+  }
+
+  .error-banner {
+    background: #3a1c17;
+    border: 1px solid var(--stamp-red);
+    color: #f2c9c0;
+    padding: 12px 14px;
+    border-radius: 3px;
+    font-size: 13px;
+    margin-top: 14px;
+  }
+
+  /* --- desk tabs (switch between the two agents) --- */
+  .desk-tabs {
+    display: flex;
+    gap: 22px;
+    margin-bottom: 20px;
+  }
+  .desk-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: rgba(239,231,216,0.5);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 4px 2px 10px;
+    cursor: pointer;
+  }
+  .desk-tab.active { color: var(--paper); border-bottom-color: var(--mustard); }
+  .desk-tab:hover:not(.active) { color: rgba(239,231,216,0.8); }
+  .desk-panel { display: none; }
+  .desk-panel.active { display: block; }
+
+  select {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--ink);
+    background: #fbf8f1;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 10px 12px;
+  }
+
+  /* --- interactive approval gate --- */
+  .stamp.waiting { color: var(--mustard); animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) {
+    .stamp.waiting { animation: none; }
+  }
+
+  .approval-actions { display: flex; gap: 10px; margin-top: 14px; }
+  .approval-btn {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 10px 12px;
+    border-radius: 2px;
+    cursor: pointer;
+    border: 1.5px solid currentColor;
+    background: transparent;
+  }
+  .approve-btn { color: var(--cobalt); }
+  .approve-btn:hover:not(:disabled) { background: rgba(42,75,124,0.12); }
+  .reject-btn { color: var(--stamp-red); }
+  .reject-btn:hover:not(:disabled) { background: rgba(163,51,31,0.08); }
+  .approval-btn:disabled { opacity: 0.4; cursor: progress; }
+  .approval-note { margin-top: 8px; font-size: 12px; color: var(--ink-soft); }
+
+  footer {
+    margin-top: 40px;
+    font-size: 11px;
+    color: rgba(239,231,216,0.35);
+    text-align: center;
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="eyebrow">Agent Framework — Dispatch Desk</div>
+      <h1>Dispatch Desk</h1>
+      <div class="sub">
+        Two live agents, both built on the same framework. Submit a support ticket or an
+        expense — either way, every pipeline stage's real result shows below as it happens.
+        See <a href="/docs">/docs</a> for the raw API.
+      </div>
+    </header>
+
+    <div class="desk-tabs">
+      <button type="button" class="desk-tab active" data-desk="support">Support Ticket</button>
+      <button type="button" class="desk-tab" data-desk="expense">Expense Approval</button>
+    </div>
+
+    <div class="desk-panel active" id="desk-support">
+      <form id="ticket-form">
+        <div class="field">
+          <label for="ticket_text">Ticket <span class="hint">what the customer wrote</span></label>
+          <textarea id="ticket_text" required placeholder="My package arrived damaged, I need a replacement or refund.">My package arrived damaged, I need a replacement or refund.</textarea>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="session_id">Customer ID <span class="hint">optional</span></label>
+            <input type="text" id="session_id" placeholder="e.g. cust-42 — reuse to test memory recall">
+          </div>
+        </div>
+        <button type="submit" id="submit-btn">Route Ticket</button>
+      </form>
+
+      <div class="perf"></div>
+
+      <div id="manifest">
+        <div class="manifest-head">
+          <span>Routing Manifest</span>
+          <span class="run-id" id="run-id-label"></span>
+        </div>
+        <div id="stages"></div>
+      </div>
+
+      <div id="error-container"></div>
+    </div>
+
+    <div class="desk-panel" id="desk-expense">
+      <form id="expense-form">
+        <div class="row">
+          <div class="field">
+            <label for="employee_id">Employee ID</label>
+            <input type="text" id="employee_id" required placeholder="e.g. emp-alice"
+                   value="emp-alice">
+          </div>
+          <div class="field">
+            <label for="amount">Amount <span class="hint">USD</span></label>
+            <input type="number" id="amount" required min="0" step="0.01" value="45.00">
+          </div>
+        </div>
+        <div class="field">
+          <label for="category">Category</label>
+          <select id="category">
+            <option value="meals">Meals</option>
+            <option value="travel">Travel</option>
+            <option value="software">Software</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="description">Description</label>
+          <textarea id="description" required placeholder="Team lunch during client visit">Team lunch during client visit</textarea>
+        </div>
+        <button type="submit" id="expense-submit-btn">Submit For Approval</button>
+      </form>
+
+      <div class="perf"></div>
+
+      <div id="expense-manifest">
+        <div class="manifest-head">
+          <span>Routing Manifest</span>
+          <span class="run-id" id="expense-run-id-label"></span>
+        </div>
+        <div id="expense-stages"></div>
+      </div>
+
+      <div id="expense-error-container"></div>
+    </div>
+
+    <footer>agentframework — built from scratch, deployed for real</footer>
+  </div>
+
+<script>
+const STAGE_DEFS = [
+  { key: "search_kb", label: "Search Knowledge Base",
+    render: (r) => {
+      const results = (r && r.results) || [];
+      if (!results.length) return '<div class="muted">No matching articles found.</div>';
+      return '<ul>' + results.map(d =>
+        `<li><strong>${escapeHtml(d.doc_id)}</strong> — ${escapeHtml(d.snippet)}</li>`
+      ).join('') + '</ul>';
+    }},
+  { key: "recall_history", label: "Recall Customer History",
+    render: (r) => {
+      const items = r || [];
+      if (!items.length) return '<div class="muted">No prior tickets on file for this customer.</div>';
+      return '<ul>' + items.map(t => `<li>${escapeHtml(t)}</li>`).join('') + '</ul>';
+    }},
+  { key: "draft_reply", label: "Draft Reply",
+    render: (r) => {
+      if (!r) return '<div class="muted">—</div>';
+      const usage = r.usage || {};
+      return `<div class="reply-box">
+        <div class="eyebrow">Drafted Reply</div>
+        <div class="reply-text">${escapeHtml(r.response || "")}</div>
+        <div class="usage">${usage.tokens ?? "?"} tokens · $${(usage.cost ?? 0).toFixed(6)}</div>
+      </div>`;
+    }},
+  { key: "remember_ticket", label: "Remember Ticket",
+    render: (r) => `<div class="muted">${escapeHtml(String(r || "—"))}</div>` },
+];
+
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+function errorMessage(body, res) {
+  // Typed error responses (see fastapi_ingress.py) return {"error_type","message","retryable"};
+  // fall back to older/raw shapes defensively rather than showing "undefined".
+  return (body && (body.message || body.detail)) || `Request failed (HTTP ${res.status})`;
+}
+
+// --- desk tab switching ---
+document.querySelectorAll('.desk-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.desk-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.desk-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('desk-' + tab.dataset.desk).classList.add('active');
+  });
+});
+
+// --- support ticket desk (single POST + GET, full result immediately) ---
+const form = document.getElementById('ticket-form');
+const submitBtn = document.getElementById('submit-btn');
+const manifest = document.getElementById('manifest');
+const stagesEl = document.getElementById('stages');
+const runIdLabel = document.getElementById('run-id-label');
+const errorContainer = document.getElementById('error-container');
+
+function renderPendingStages(container, defs) {
+  container.innerHTML = defs.map(s => `
+    <div class="stage pending" data-key="${s.key}">
+      <div class="stage-top">
+        <span class="stage-name">${s.label}</span>
+        <span class="stamp pending">Pending</span>
+      </div>
+      <div class="stage-body muted">Waiting…</div>
+    </div>
+  `).join('');
+}
+
+function revealStage(stageEl, status, bodyHtml, delayMs) {
+  return new Promise(resolve => {
+    setTimeout(() => {
+      stageEl.className = 'stage ' + status;
+      const stampEl = stageEl.querySelector('.stamp');
+      stampEl.className = 'stamp ' + status;
+      stampEl.textContent = status === 'done' ? 'Processed'
+        : status === 'error' ? 'Failed'
+        : status === 'waiting' ? 'Awaiting approval'
+        : 'Running';
+      stageEl.querySelector('.stage-body').innerHTML = bodyHtml;
+      resolve();
+    }, delayMs);
+  });
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errorContainer.innerHTML = '';
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Transmitting…';
+
+  manifest.classList.add('show');
+  renderPendingStages(stagesEl, STAGE_DEFS);
+  runIdLabel.textContent = '';
+
+  const ticketText = document.getElementById('ticket_text').value.trim();
+  const sessionId = document.getElementById('session_id').value.trim();
+
+  const body = {
+    flow_name: 'customer-support-ticket',
+    inputs: { ticket_text: ticketText },
+  };
+  if (sessionId) body.session_id = sessionId;
+
+  try {
+    const res = await fetch('/v1/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const created = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(errorMessage(created, res));
+    runIdLabel.textContent = created.run_id;
+
+    const detailRes = await fetch(`/v1/runs/${created.run_id}`);
+    const detail = await detailRes.json().catch(() => ({}));
+    if (!detailRes.ok) throw new Error(errorMessage(detail, detailRes));
+
+    const stageEls = STAGE_DEFS.map(s => stagesEl.querySelector(`[data-key="${s.key}"]`));
+    for (let i = 0; i < STAGE_DEFS.length; i++) {
+      const def = STAGE_DEFS[i];
+      const task = (detail.tasks || {})[def.key];
+      const status = !task ? 'error' : task.status === 'succeeded' ? 'done' : 'error';
+      const bodyHtml = task && task.status === 'succeeded'
+        ? def.render(task.result)
+        : `<div class="muted">${escapeHtml((task && task.error) || 'No data returned.')}</div>`;
+      await revealStage(stageEls[i], status, bodyHtml, i === 0 ? 120 : 420);
+    }
+  } catch (err) {
+    errorContainer.innerHTML = `<div class="error-banner"><strong>Undeliverable —</strong> ${escapeHtml(err.message)}</div>`;
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Route Ticket';
+  }
+});
+
+// --- expense approval desk: POST returns "queued" immediately, then this polls GET until
+// "waiting" (showing the assessment + real Approve/Reject buttons), then polls again after a
+// decision until the run actually finishes. Mirrors exactly what a real client integrating
+// with this API has to do — see DEPLOY.md's "testing the expense approval agent" section. ---
+const expenseForm = document.getElementById('expense-form');
+const expenseSubmitBtn = document.getElementById('expense-submit-btn');
+const expenseManifest = document.getElementById('expense-manifest');
+const expenseStagesEl = document.getElementById('expense-stages');
+const expenseRunIdLabel = document.getElementById('expense-run-id-label');
+const expenseErrorContainer = document.getElementById('expense-error-container');
+
+const EXPENSE_STAGE_DEFS = [
+  { key: "search_policy", label: "Search Expense Policy",
+    render: (r) => {
+      const results = (r && r.results) || [];
+      if (!results.length) return '<div class="muted">No matching policy sections found.</div>';
+      return '<ul>' + results.map(d =>
+        `<li><strong>${escapeHtml(d.doc_id)}</strong> — ${escapeHtml(d.snippet)}</li>`
+      ).join('') + '</ul>';
+    }},
+  { key: "recall_history", label: "Recall Employee History",
+    render: (r) => {
+      const items = r || [];
+      if (!items.length) return '<div class="muted">No prior expenses on file for this employee.</div>';
+      return '<ul>' + items.map(t => `<li>${escapeHtml(t)}</li>`).join('') + '</ul>';
+    }},
+  { key: "assess_expense", label: "Assess Expense",
+    render: (r) => {
+      if (!r) return '<div class="muted">—</div>';
+      const usage = r.usage || {};
+      return `<div class="reply-box">
+        <div class="eyebrow">Assessment</div>
+        <div class="reply-text">${escapeHtml(r.response || "")}</div>
+        <div class="usage">${usage.tokens ?? "?"} tokens · $${(usage.cost ?? 0).toFixed(6)}</div>
+      </div>`;
+    }},
+];
+
+async function pollRun(runId, isDone, timeoutMs = 20000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await fetch(`/v1/runs/${runId}`);
+    const detail = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(errorMessage(detail, res));
+    if (isDone(detail)) return detail;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  throw new Error('Timed out waiting for the run to update.');
+}
+
+function renderApprovalGate(stageEl, assessment) {
+  stageEl.className = 'stage waiting';
+  const stampEl = stageEl.querySelector('.stamp');
+  stampEl.className = 'stamp waiting';
+  stampEl.textContent = 'Awaiting approval';
+  stageEl.querySelector('.stage-body').innerHTML = `
+    <div class="muted" style="margin-bottom:10px;">This submission genuinely pauses here —
+      a human has to decide, for real, before anything else runs.</div>
+    <div class="approval-actions">
+      <button type="button" class="approval-btn approve-btn" id="approve-btn">Approve</button>
+      <button type="button" class="approval-btn reject-btn" id="reject-btn">Reject</button>
+    </div>
+    <div class="approval-note" id="approval-note"></div>
+  `;
+}
+
+expenseForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  expenseErrorContainer.innerHTML = '';
+  expenseSubmitBtn.disabled = true;
+  expenseSubmitBtn.textContent = 'Transmitting…';
+
+  expenseManifest.classList.add('show');
+  const gateDef = { key: 'request_approval', label: 'Approval Gate' };
+  const recordDef = { key: 'record_decision', label: 'Record Decision' };
+  renderPendingStages(expenseStagesEl, [...EXPENSE_STAGE_DEFS, gateDef, recordDef]);
+  expenseRunIdLabel.textContent = '';
+
+  const employeeId = document.getElementById('employee_id').value.trim();
+  const amount = parseFloat(document.getElementById('amount').value);
+  const category = document.getElementById('category').value;
+  const description = document.getElementById('description').value.trim();
+
+  try {
+    const res = await fetch('/v1/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        flow_name: 'expense-approval',
+        inputs: { employee_id: employeeId, amount, category, description },
+        session_id: employeeId,
+      }),
+    });
+    const created = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(errorMessage(created, res));
+    const runId = created.run_id;
+    expenseRunIdLabel.textContent = runId;
+
+    // POST returned "queued" — the run is executing in the background. Poll until it reaches
+    // "waiting" (search_policy/recall_history/assess_expense all run before the approval gate).
+    const waitingDetail = await pollRun(runId, d => d.status === 'waiting' || d.status === 'failed');
+    if (waitingDetail.status === 'failed') {
+      const failedTask = Object.entries(waitingDetail.tasks || {})
+        .find(([, t]) => t.status === 'failed');
+      const detail = failedTask
+        ? `"${failedTask[0]}" failed: ${failedTask[1].error || 'no error message recorded'}`
+        : 'no failed task found in the response — check /docs for the raw run detail.';
+      throw new Error(`Run failed before reaching approval (run_id: ${runId}) — ${detail}`);
+    }
+
+    const stageEls = EXPENSE_STAGE_DEFS.map(s => expenseStagesEl.querySelector(`[data-key="${s.key}"]`));
+    for (let i = 0; i < EXPENSE_STAGE_DEFS.length; i++) {
+      const def = EXPENSE_STAGE_DEFS[i];
+      const task = waitingDetail.tasks[def.key];
+      const status = !task ? 'error' : task.status === 'succeeded' ? 'done' : 'error';
+      const bodyHtml = task && task.status === 'succeeded'
+        ? def.render(task.result)
+        : `<div class="muted">${escapeHtml((task && task.error) || 'No data returned.')}</div>`;
+      await revealStage(stageEls[i], status, bodyHtml, i === 0 ? 120 : 420);
+    }
+
+    const gateEl = expenseStagesEl.querySelector('[data-key="request_approval"]');
+    renderApprovalGate(gateEl);
+
+    const decision = await new Promise(resolve => {
+      gateEl.querySelector('#approve-btn').addEventListener('click', () => resolve(true));
+      gateEl.querySelector('#reject-btn').addEventListener('click', () => resolve(false));
+    });
+
+    gateEl.querySelector('#approve-btn').disabled = true;
+    gateEl.querySelector('#reject-btn').disabled = true;
+    gateEl.querySelector('#approval-note').textContent = 'Recording decision…';
+
+    const approveRes = await fetch(`/v1/runs/${runId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_name: 'request_approval', approved: decision }),
+    });
+    const approveBody = await approveRes.json().catch(() => ({}));
+    if (!approveRes.ok) throw new Error(errorMessage(approveBody, approveRes));
+
+    const finalDetail = await pollRun(runId, d => d.status === 'succeeded' || d.status === 'failed');
+    const gateTask = finalDetail.tasks.request_approval;
+    const gateStatus = decision && gateTask.status === 'succeeded' ? 'done' : 'error';
+    const gateStamp = gateEl.querySelector('.stamp');
+    gateStamp.className = 'stamp ' + gateStatus;
+    gateStamp.textContent = decision ? 'Approved' : 'Rejected';
+    gateEl.className = 'stage ' + gateStatus;
+    gateEl.querySelector('#approval-note').textContent = decision
+      ? 'Approved — releasing to record the decision.'
+      : (gateTask.error || 'Rejected.');
+
+    const recordEl = expenseStagesEl.querySelector('[data-key="record_decision"]');
+    const recordTask = finalDetail.tasks.record_decision;
+    if (decision && recordTask && recordTask.status === 'succeeded') {
+      await revealStage(recordEl, 'done',
+        `<div class="muted">${escapeHtml(String(recordTask.result))}</div>`, 300);
+    } else {
+      await revealStage(recordEl, 'pending',
+        '<div class="muted">Not reached — the expense was rejected.</div>', 300);
+    }
+  } catch (err) {
+    expenseErrorContainer.innerHTML = `<div class="error-banner"><strong>Undeliverable —</strong> ${escapeHtml(err.message)}</div>`;
+  } finally {
+    expenseSubmitBtn.disabled = false;
+    expenseSubmitBtn.textContent = 'Submit For Approval';
+  }
+});
+</script>
+</body>
+</html>
